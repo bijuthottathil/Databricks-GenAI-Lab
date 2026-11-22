@@ -42,3 +42,72 @@ resources:
         - task_key: uc06_agent_bricks
           depends_on: [{ task_key: uc05_tools_multistage_reasoning }]
           notebook_task: { notebook_path: ./06_agent_bricks/agent_bricks_patterns.py }
+
+    data_preparation_usecases:
+      name: data_preparation_usecases
+      tasks:
+        - task_key: s2_01_chunking_strategy
+          notebook_task: { notebook_path: ./section2_data_preparation/01_chunking_strategy/chunking_strategies.py }
+        - task_key: s2_02_filter_extraneous_content
+          depends_on: [{ task_key: s2_01_chunking_strategy }]
+          notebook_task: { notebook_path: ./section2_data_preparation/02_filter_extraneous_content/filter_extraneous_content.py }
+        - task_key: s2_03_document_extraction_packages
+          depends_on: [{ task_key: s2_02_filter_extraneous_content }]
+          notebook_task: { notebook_path: ./section2_data_preparation/03_document_extraction_packages/extract_document_content.py }
+        - task_key: s2_04_write_chunks_to_delta
+          depends_on: [{ task_key: s2_03_document_extraction_packages }]
+          notebook_task: { notebook_path: ./section2_data_preparation/04_write_chunks_to_delta/write_chunks_to_delta.py }
+        - task_key: s2_05_identify_source_documents
+          depends_on: [{ task_key: s2_04_write_chunks_to_delta }]
+          notebook_task: { notebook_path: ./section2_data_preparation/05_identify_source_documents/identify_source_documents.py }
+        - task_key: s2_06_evaluate_retrieval
+          depends_on: [{ task_key: s2_05_identify_source_documents }]
+          notebook_task: { notebook_path: ./section2_data_preparation/06_evaluate_retrieval/evaluate_retrieval.py }
+        - task_key: s2_07_advanced_chunking
+          depends_on: [{ task_key: s2_06_evaluate_retrieval }]
+          notebook_task: { notebook_path: ./section2_data_preparation/07_advanced_chunking/advanced_chunking_retrieval.py }
+        - task_key: s2_08_reranking
+          depends_on: [{ task_key: s2_07_advanced_chunking }]
+          notebook_task: { notebook_path: ./section2_data_preparation/08_reranking/reranking.py }
+
+    application_development_usecases:
+      name: application_development_usecases
+      tasks:
+        - task_key: s3_01_select_langchain_tools
+          notebook_task: { notebook_path: ./section3_application_development/01_select_langchain_tools/select_genai_tools.py }
+        - task_key: s3_02_assess_response_quality_safety
+          depends_on: [{ task_key: s3_01_select_langchain_tools }]
+          notebook_task: { notebook_path: ./section3_application_development/02_assess_response_quality_safety/assess_quality_safety.py }
+        - task_key: s3_03_select_chunking_by_evaluation
+          depends_on: [{ task_key: s3_02_assess_response_quality_safety }]
+          notebook_task: { notebook_path: ./section3_application_development/03_select_chunking_by_evaluation/select_chunking_by_evaluation.py }
+        - task_key: s3_04_augment_prompt_with_user_context
+          depends_on: [{ task_key: s3_03_select_chunking_by_evaluation }]
+          notebook_task: { notebook_path: ./section3_application_development/04_augment_prompt_with_user_context/augment_prompt.py }
+        - task_key: s3_05_prompt_baseline_to_desired
+          depends_on: [{ task_key: s3_04_augment_prompt_with_user_context }]
+          notebook_task: { notebook_path: ./section3_application_development/05_prompt_baseline_to_desired/prompt_iteration.py }
+        - task_key: s3_06_llm_guardrails
+          depends_on: [{ task_key: s3_05_prompt_baseline_to_desired }]
+          notebook_task: { notebook_path: ./section3_application_development/06_llm_guardrails/llm_guardrails.py }
+        - task_key: s3_07_select_best_llm
+          depends_on: [{ task_key: s3_06_llm_guardrails }]
+          notebook_task: { notebook_path: ./section3_application_development/07_select_best_llm/select_best_llm.py }
+        - task_key: s3_08_embedding_context_length
+          depends_on: [{ task_key: s3_07_select_best_llm }]
+          notebook_task: { notebook_path: ./section3_application_development/08_embedding_context_length/embedding_context_length.py }
+        - task_key: s3_09_model_cards_marketplace
+          depends_on: [{ task_key: s3_08_embedding_context_length }]
+          notebook_task: { notebook_path: ./section3_application_development/09_model_cards_marketplace/select_model_from_model_cards.py }
+        - task_key: s3_10_select_model_by_metrics
+          depends_on: [{ task_key: s3_09_model_cards_marketplace }]
+          notebook_task: { notebook_path: ./section3_application_development/10_select_model_by_metrics/select_model_by_metrics.py }
+        - task_key: s3_11_mlflow_agent_framework
+          depends_on: [{ task_key: s3_10_select_model_by_metrics }]
+          notebook_task: { notebook_path: ./section3_application_development/11_mlflow_agent_framework/mlflow_agent_framework.py }
+        - task_key: s3_12_evaluation_vs_monitoring
+          depends_on: [{ task_key: s3_11_mlflow_agent_framework }]
+          notebook_task: { notebook_path: ./section3_application_development/12_evaluation_vs_monitoring/evaluation_vs_monitoring.py }
+        - task_key: s3_13_multi_agent_genie
+          depends_on: [{ task_key: s3_12_evaluation_vs_monitoring }]
+          notebook_task: { notebook_path: ./section3_application_development/13_multi_agent_genie/multi_agent_genie.py }
