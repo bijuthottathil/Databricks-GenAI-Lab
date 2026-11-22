@@ -19,11 +19,11 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Plain-code equivalent of `ask_llm` (for understanding)
-# MAGIC `ask_llm(prompt)` from `00_setup/config` is just this: build a chat `messages` list, send it to the
-# MAGIC model serving endpoint, and pull the reply text out of the response. (`ask_llm` also retries on HTTP 429 rate limits.)
+# MAGIC ### How a model call works (plain code, reused in every cell below)
+# MAGIC Every model call is the same 3 steps: build a chat `messages` list, send it to the model serving endpoint
+# MAGIC with `client.predict`, and pull the reply text out of `response["choices"][0]["message"]["content"]`.
 # MAGIC
-# MAGIC Part A uses `ask_llm`; Part B uses `ChatDatabricks.bind_tools`, which sends the same request plus a `tools` list.
+# MAGIC Part A calls `client.predict` directly; Part B uses `ChatDatabricks.bind_tools`, which sends the same request plus a `tools` list.
 
 # COMMAND ----------
 
@@ -49,14 +49,9 @@ response = client.predict(
 # 3. The raw response: the answer is in choices[0].message.content
 print(json.dumps(response, indent=2, default=str)[:1500])
 
-# 4. Extract just the text - this is what ask_llm returns
+# 4. Extract just the text
 answer = response["choices"][0]["message"]["content"].strip()
 print("\nAnswer:", answer)
-
-# COMMAND ----------
-
-# Same thing in one line with the helper
-print(ask_llm(prompt, system="You are a customer support assistant."))
 
 # COMMAND ----------
 
@@ -66,9 +61,20 @@ print(ask_llm(prompt, system="You are a customer support assistant."))
 
 def classify_issue(message: str) -> str:
     """Identify the ticket category for a customer message."""
-    return ask_llm(
-        "Return one category only, no other text: Shipping, Return, Product Defect, Payment, Wrong Item, Positive Feedback, Other.\n\n"
-        f"Message: {message}").strip().strip(".")
+    prompt = ("Return one category only, no other text: Shipping, Return, Product Defect, Payment, Wrong Item, Positive Feedback, Other.\n\n"
+              f"Message: {message}")
+    response = client.predict(
+        endpoint=ENDPOINT,
+        inputs={
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 500,
+        },
+    )
+    answer = response["choices"][0]["message"]["content"].strip()
+    return answer.strip(".")
 
 
 def policy_lookup(category: str) -> str:
@@ -124,7 +130,18 @@ Company policy: {policy}
 Recommended action: {action}
 Write a polite response to the customer.
 Do not promise a delivery date that is not available."""
-print("\n--- Response (5. generate) ---\n" + ask_llm(final_prompt, temperature=0.3))
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": final_prompt},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print("\n--- Response (5. generate) ---\n" + answer)
 
 # COMMAND ----------
 

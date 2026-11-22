@@ -23,9 +23,9 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Plain-code equivalent of `ask_llm` (for understanding)
-# MAGIC `ask_llm(prompt)` from `00_setup/config` is just this: build a chat `messages` list, send it to the
-# MAGIC model serving endpoint, and pull the reply text out of the response. (`ask_llm` also retries on HTTP 429 rate limits.)
+# MAGIC ### How a model call works (plain code, reused in every cell below)
+# MAGIC Every model call is the same 3 steps: build a chat `messages` list, send it to the model serving endpoint
+# MAGIC with `client.predict`, and pull the reply text out of `response["choices"][0]["message"]["content"]`.
 # MAGIC
 # MAGIC This notebook's SQL `ai_query('<endpoint>', prompt)` is the same call, run in parallel over every row of a table.
 
@@ -53,14 +53,9 @@ response = client.predict(
 # 3. The raw response: the answer is in choices[0].message.content
 print(json.dumps(response, indent=2, default=str)[:1500])
 
-# 4. Extract just the text - this is what ask_llm returns
+# 4. Extract just the text
 answer = response["choices"][0]["message"]["content"].strip()
 print("\nAnswer:", answer)
-
-# COMMAND ----------
-
-# Same thing in one line with the helper
-print(ask_llm(prompt))
 
 # COMMAND ----------
 

@@ -25,9 +25,9 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Plain-code equivalent of `ask_llm` (for understanding)
-# MAGIC `ask_llm(prompt)` from `00_setup/config` is just this: build a chat `messages` list, send it to the
-# MAGIC model serving endpoint, and pull the reply text out of the response. (`ask_llm` also retries on HTTP 429 rate limits.)
+# MAGIC ### How a model call works (plain code, reused in every cell below)
+# MAGIC Every model call is the same 3 steps: build a chat `messages` list, send it to the model serving endpoint
+# MAGIC with `client.predict`, and pull the reply text out of `response["choices"][0]["message"]["content"]`.
 
 # COMMAND ----------
 
@@ -53,14 +53,9 @@ response = client.predict(
 # 3. The raw response: the answer is in choices[0].message.content
 print(json.dumps(response, indent=2, default=str)[:1500])
 
-# 4. Extract just the text - this is what ask_llm returns
+# 4. Extract just the text
 answer = response["choices"][0]["message"]["content"].strip()
 print("\nAnswer:", answer)
-
-# COMMAND ----------
-
-# Same thing in one line with the helper
-print(ask_llm(prompt, system="You are an e-commerce policy assistant. Answer only using the policy provided."))
 
 # COMMAND ----------
 
@@ -88,7 +83,19 @@ If the answer is unavailable, say that the policy does not specify it."""
 
 def knowledge_assistant(question: str) -> str:
     context = "\n\n".join(f"[{name}]\n{text}" for name, text in docs.items())
-    return ask_llm(f"Company policies:\n{context}\n\nQuestion: {question}", system=KA_INSTRUCTIONS)
+    response = client.predict(
+        endpoint=ENDPOINT,
+        inputs={
+            "messages": [
+                {"role": "system", "content": KA_INSTRUCTIONS},
+                {"role": "user", "content": f"Company policies:\n{context}\n\nQuestion: {question}"},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 500,
+        },
+    )
+    answer = response["choices"][0]["message"]["content"].strip()
+    return answer
 
 for q in ["Can a customer return a laptop after 20 days?",
           "Can I get a replacement for defective headphones?",
@@ -122,25 +129,57 @@ AGENTS = {
 }
 
 def call_agent(name: str, request: str) -> str:
-    return ask_llm(f"Policies:\n{policy_text}\n\nCustomer request: {request}\n\nGive your finding in 2 sentences.",
-                   system=AGENTS[name])
+    response = client.predict(
+        endpoint=ENDPOINT,
+        inputs={
+            "messages": [
+                {"role": "system", "content": AGENTS[name]},
+                {"role": "user", "content": f"Policies:\n{policy_text}\n\nCustomer request: {request}\n\nGive your finding in 2 sentences."},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 500,
+        },
+    )
+    answer = response["choices"][0]["message"]["content"].strip()
+    return answer
 
 def supervisor(request: str) -> str:
     # 1. Route: which specialists are relevant?
-    routing = parse_json(ask_llm(
-        f"Agents available: {list(AGENTS)}. Return JSON {{\"agents\": [...]}} listing every agent relevant to this request.\n\nRequest: {request}"))
+    response = client.predict(
+        endpoint=ENDPOINT,
+        inputs={
+            "messages": [
+                {"role": "user", "content": f"Agents available: {list(AGENTS)}. Return JSON {{\"agents\": [...]}} listing every agent relevant to this request.\n\nRequest: {request}"},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 500,
+        },
+    )
+    answer = response["choices"][0]["message"]["content"].strip()
+    # the model may wrap JSON in ``` fences, so keep only the {...} part before json.loads
+    routing = json.loads(answer[answer.find("{"): answer.rfind("}") + 1])
     findings = {}
     for name in routing.get("agents", []):
         if name in AGENTS:
             findings[name] = call_agent(name, request)
             print(f"[{name}] {findings[name]}\n")
     # 2. Consolidate
-    return ask_llm(
-        f"Customer request: {request}\n\nSpecialist findings:\n{json.dumps(findings, indent=2)}\n\n"
-        "As the Supervisor, resolve any conflicting recommendations and write ONE final response to the customer.",
-        system="You are the Supervisor agent coordinating customer support specialists.")
+    prompt = (f"Customer request: {request}\n\nSpecialist findings:\n{json.dumps(findings, indent=2)}\n\n"
+              "As the Supervisor, resolve any conflicting recommendations and write ONE final response to the customer.")
+    response = client.predict(
+        endpoint=ENDPOINT,
+        inputs={
+            "messages": [
+                {"role": "system", "content": "You are the Supervisor agent coordinating customer support specialists."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 500,
+        },
+    )
+    answer = response["choices"][0]["message"]["content"].strip()
+    return answer
 
-import json
 print("FINAL:\n" + supervisor("I purchased a laptop for $1200. It arrived five days late, and now it is not working. I want a refund."))
 
 # COMMAND ----------
@@ -166,7 +205,19 @@ Fields: invoice_number, vendor_name, invoice_date, subtotal (number), tax (numbe
 Invoice:
 {invoice}"""
 
-fields = parse_json(ask_llm(extraction_prompt))
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": extraction_prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+# the model may wrap JSON in ``` fences, so keep only the {...} part before json.loads
+fields = json.loads(answer[answer.find("{"): answer.rfind("}") + 1])
 fields
 
 # COMMAND ----------

@@ -23,9 +23,9 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Plain-code equivalent of `ask_llm` (for understanding)
-# MAGIC `ask_llm(prompt)` from `00_setup/config` is just this: build a chat `messages` list, send it to the
-# MAGIC model serving endpoint, and pull the reply text out of the response. (`ask_llm` also retries on HTTP 429 rate limits.)
+# MAGIC ### How a model call works (plain code, reused in every cell below)
+# MAGIC Every model call is the same 3 steps: build a chat `messages` list, send it to the model serving endpoint
+# MAGIC with `client.predict`, and pull the reply text out of `response["choices"][0]["message"]["content"]`.
 
 # COMMAND ----------
 
@@ -51,14 +51,9 @@ response = client.predict(
 # 3. The raw response: the answer is in choices[0].message.content
 print(json.dumps(response, indent=2, default=str)[:1500])
 
-# 4. Extract just the text - this is what ask_llm returns
+# 4. Extract just the text
 answer = response["choices"][0]["message"]["content"].strip()
 print("\nAnswer:", answer)
-
-# COMMAND ----------
-
-# Same thing in one line with the helper
-print(ask_llm(prompt))
 
 # COMMAND ----------
 
@@ -71,10 +66,23 @@ message = ("I purchased a laptop for $1200. The delivery is 5 days late. I am ve
 
 # COMMAND ----------
 
-print(ask_llm(f"""Classify the customer complaint. Return one category only, no other text:
+prompt = f"""Classify the customer complaint. Return one category only, no other text:
 Shipping, Return, Payment, Product Defect, Other.
 
-Complaint: {message}"""))
+Complaint: {message}"""
+
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print(answer)
 
 # COMMAND ----------
 
@@ -82,7 +90,20 @@ Complaint: {message}"""))
 
 # COMMAND ----------
 
-print(ask_llm(f"What is the sentiment of this message? Answer with one word: Positive, Neutral, or Negative.\n\n{message}"))
+prompt = f"What is the sentiment of this message? Answer with one word: Positive, Neutral, or Negative.\n\n{message}"
+
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print(answer)
 
 # COMMAND ----------
 
@@ -90,7 +111,20 @@ print(ask_llm(f"What is the sentiment of this message? Answer with one word: Pos
 
 # COMMAND ----------
 
-print(ask_llm(f"Summarize the complaint in a maximum of 15 words.\n\n{message}"))
+prompt = f"Summarize the complaint in a maximum of 15 words.\n\n{message}"
+
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print(answer)
 
 # COMMAND ----------
 
@@ -98,10 +132,24 @@ print(ask_llm(f"Summarize the complaint in a maximum of 15 words.\n\n{message}")
 
 # COMMAND ----------
 
-extracted = parse_json(ask_llm(f"""Extract these fields from the complaint and return JSON only:
+prompt = f"""Extract these fields from the complaint and return JSON only:
 product (string), amount (number), delivery_delay_days (number), customer_sentiment (Positive/Neutral/Negative).
 
-Complaint: {message}"""))
+Complaint: {message}"""
+
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+# the model may wrap JSON in ``` fences, so keep only the {...} part before json.loads
+extracted = json.loads(answer[answer.find("{"): answer.rfind("}") + 1])
 extracted
 
 # COMMAND ----------
@@ -110,9 +158,34 @@ extracted
 
 # COMMAND ----------
 
-print(ask_llm(f"Translate this customer message into Malayalam:\n\n{message}"))
+# Translation
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": f"Translate this customer message into Malayalam:\n\n{message}"},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print(answer)
 print("---")
-print(ask_llm(f"Write a short, polite apology to this customer. Do not promise a delivery date.\n\n{message}", temperature=0.3))
+
+# Text generation (temperature 0.3 = a little more varied wording)
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": f"Write a short, polite apology to this customer. Do not promise a delivery date.\n\n{message}"},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print(answer)
 
 # COMMAND ----------
 
@@ -125,7 +198,7 @@ import numpy as np
 EMBED_ENDPOINT = "databricks-gte-large-en"
 tickets = spark.table("customer_support_tickets").select("ticket_id", "customer_message").collect()
 texts = [message] + [t.customer_message for t in tickets]
-emb = _client.predict(endpoint=EMBED_ENDPOINT, inputs={"input": texts})
+emb = client.predict(endpoint=EMBED_ENDPOINT, inputs={"input": texts})
 vecs = np.array([d["embedding"] for d in emb["data"]])
 vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
 scores = vecs[1:] @ vecs[0]

@@ -22,9 +22,9 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Plain-code equivalent of `ask_llm` (for understanding)
-# MAGIC `ask_llm(prompt)` from `00_setup/config` is just this: build a chat `messages` list, send it to the
-# MAGIC model serving endpoint, and pull the reply text out of the response. (`ask_llm` also retries on HTTP 429 rate limits.)
+# MAGIC ### How a model call works (plain code, reused in every cell below)
+# MAGIC Every model call is the same 3 steps: build a chat `messages` list, send it to the model serving endpoint
+# MAGIC with `client.predict`, and pull the reply text out of `response["choices"][0]["message"]["content"]`.
 
 # COMMAND ----------
 
@@ -50,14 +50,9 @@ response = client.predict(
 # 3. The raw response: the answer is in choices[0].message.content
 print(json.dumps(response, indent=2, default=str)[:1500])
 
-# 4. Extract just the text - this is what ask_llm returns
+# 4. Extract just the text
 answer = response["choices"][0]["message"]["content"].strip()
 print("\nAnswer:", answer)
-
-# COMMAND ----------
-
-# Same thing in one line with the helper
-print(ask_llm(prompt, system="You are an e-commerce customer support classifier."))
 
 # COMMAND ----------
 
@@ -66,7 +61,18 @@ print(ask_llm(prompt, system="You are an e-commerce customer support classifier.
 
 # COMMAND ----------
 
-print(ask_llm("Analyze this ticket: My order has not arrived. It is 5 days late."))
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": "Analyze this ticket: My order has not arrived. It is 5 days late."},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print(answer)
 
 # COMMAND ----------
 
@@ -90,9 +96,21 @@ Required output format:
 Customer message:
 {message}"""
 
-raw = ask_llm(PROMPT_TEMPLATE.format(message="My order has not arrived. It is 5 days late."))
-print(raw)
-result = parse_json(raw)
+response = client.predict(
+    endpoint=ENDPOINT,
+    inputs={
+        "messages": [
+            {"role": "user", "content": PROMPT_TEMPLATE.format(message="My order has not arrived. It is 5 days late.")},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    },
+)
+answer = response["choices"][0]["message"]["content"].strip()
+print(answer)
+
+# the model may wrap JSON in ``` fences, so keep only the {...} part before json.loads
+result = json.loads(answer[answer.find("{"): answer.rfind("}") + 1])
 result
 
 # COMMAND ----------
@@ -127,7 +145,19 @@ ALLOWED = {
 
 rows = []
 for t in spark.table("customer_support_tickets").collect():
-    out = parse_json(ask_llm(FEW_SHOT_TEMPLATE.format(message=t.customer_message)))
+    response = client.predict(
+        endpoint=ENDPOINT,
+        inputs={
+            "messages": [
+                {"role": "user", "content": FEW_SHOT_TEMPLATE.format(message=t.customer_message)},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 500,
+        },
+    )
+    answer = response["choices"][0]["message"]["content"].strip()
+    # the model may wrap JSON in ``` fences, so keep only the {...} part before json.loads
+    out = json.loads(answer[answer.find("{"): answer.rfind("}") + 1])
     valid = all(out.get(k) in v for k, v in ALLOWED.items())
     rows.append((t.ticket_id, t.customer_message, t.expected_category, out.get("category"),
                  out.get("sentiment"), out.get("priority"), out.get("recommended_action"), valid))
