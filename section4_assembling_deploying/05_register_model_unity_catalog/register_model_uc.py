@@ -185,9 +185,20 @@ print("challenger accuracy:", (tests.challenger == tests.expected).mean())
 
 # COMMAND ----------
 
+# Unity Catalog's search_model_versions does not reliably fill in v.aliases, so read the aliases from the
+# registered model instead: it gives a dict like {"champion": "1", "challenger": "2"}.
+alias_map = client.get_registered_model(MODEL_NAME).aliases or {}
+if not isinstance(alias_map, dict):                     # some MLflow versions return a list of alias objects
+    alias_map = {a.alias: a.version for a in alias_map}
+aliases_by_version = {}
+for alias, version in alias_map.items():
+    aliases_by_version.setdefault(str(version), []).append(alias)
+
 versions = client.search_model_versions(f"name='{MODEL_NAME}'")
-display(spark.createDataFrame([(int(v.version), v.run_id, v.status, ", ".join(v.aliases or [])) for v in versions],
-                              "version int, run_id string, status string, aliases string").orderBy("version"))
+display(spark.createDataFrame(
+    [(int(v.version), v.run_id, str(v.status), ", ".join(sorted(aliases_by_version.get(str(v.version), []))))
+     for v in versions],
+    "version int, run_id string, status string, aliases string").orderBy("version"))
 
 # COMMAND ----------
 
