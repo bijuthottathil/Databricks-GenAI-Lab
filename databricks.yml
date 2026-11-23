@@ -111,3 +111,42 @@ resources:
         - task_key: s3_13_multi_agent_genie
           depends_on: [{ task_key: s3_12_evaluation_vs_monitoring }]
           notebook_task: { notebook_path: ./section3_application_development/13_multi_agent_genie/multi_agent_genie.py }
+
+    assembling_deploying_usecases:
+      name: assembling_deploying_usecases
+      tasks:
+        - task_key: s4_01_pyfunc_chain_pre_post_processing
+          notebook_task: { notebook_path: ./section4_assembling_deploying/01_pyfunc_chain_pre_post_processing/pyfunc_chain.py }
+        - task_key: s4_02_serving_endpoint_access_control
+          depends_on: [{ task_key: s4_01_pyfunc_chain_pre_post_processing }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/02_serving_endpoint_access_control/serving_access_control.py }
+        - task_key: s4_03_simple_chain_from_requirements
+          depends_on: [{ task_key: s4_02_serving_endpoint_access_control }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/03_simple_chain_from_requirements/simple_chain.py }
+        - task_key: s4_04_rag_application_elements
+          depends_on: [{ task_key: s4_03_simple_chain_from_requirements }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/04_rag_application_elements/rag_application_elements.py }
+        - task_key: s4_05_register_model_unity_catalog
+          depends_on: [{ task_key: s4_04_rag_application_elements }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/05_register_model_unity_catalog/register_model_uc.py }
+        - task_key: s4_06_create_query_vector_search
+          depends_on: [{ task_key: s4_05_register_model_unity_catalog }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/06_create_query_vector_search/create_query_vector_search.py }
+        - task_key: s4_07_serve_with_foundation_model_apis
+          depends_on: [{ task_key: s4_06_create_query_vector_search }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/07_serve_with_foundation_model_apis/serve_with_fmapi.py }
+        - task_key: s4_08_vector_search_concepts
+          depends_on: [{ task_key: s4_07_serve_with_foundation_model_apis }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/08_vector_search_concepts/vector_search_concepts.py }
+        - task_key: s4_09_batch_inference_ai_query
+          depends_on: [{ task_key: s4_08_vector_search_concepts }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/09_batch_inference_ai_query/batch_inference_ai_query.py }
+        - task_key: s4_10_configure_vector_search
+          depends_on: [{ task_key: s4_09_batch_inference_ai_query }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/10_configure_vector_search/configure_vector_search.py }
+        - task_key: s4_11_persistent_memory_store
+          depends_on: [{ task_key: s4_10_configure_vector_search }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/11_persistent_memory_store/persistent_memory_store.py }
+        - task_key: s4_12_cicd_best_practices
+          depends_on: [{ task_key: s4_11_persistent_memory_store }]
+          notebook_task: { notebook_path: ./section4_assembling_deploying/12_cicd_best_practices/cicd_best_practices.py }
