@@ -71,6 +71,35 @@ Self-contained notebooks with key-word tables, cell-flow diagrams and "how to re
 Section 4 writes to schema `workspace.fde_deploy`. **Cost note:** 4.6 creates a Vector Search endpoint that keeps
 running until you delete it (cleanup cell at the end); 4.7 only creates a serving endpoint if you set `DEPLOY = True`.
 
+### Section 5 – Governance (`section5_governance/`)
+
+| Folder | Objective |
+|---|---|
+| `01_masking_guardrails_performance/` | No mask vs sentence drop vs typed placeholders scored on privacy + accuracy + latency; pseudonymisation, `ai_mask`, UC column masks |
+| `02_guardrails_malicious_inputs/` | 9 attacks + 3 benign through size limit, rule filter, LLM classifier; detection matrix, hardened prompt + canary, indirect injection, least privilege |
+| `03_legal_licensing_data_sources/` | Licence table, data source register with include/review/exclude rules, UC tags, licence-filtered chunks, attribution by code |
+| `04_problematic_text_mitigation/` | Detect toxic/outdated/PII/dangerous/biased/spam posts; mask, detoxify, drop, replace with official source, review queue |
+
+Section 5 writes to schema `workspace.fde_governance`.
+
+### Section 6 – Evaluation and Monitoring (`section6_evaluation_monitoring/`)
+
+| Folder | Objective |
+|---|---|
+| `01_select_llm_size_architecture/` | 8B / 12B / MoE 80B-A3B / 70B on classification, JSON extraction, reasoning, latency; quality gate then efficiency |
+| `02_key_metrics_by_scenario/` | Scenario features → metric set; 7 days of simulated logs → daily metrics, thresholds, alerts |
+| `03_agent_eval_scoring_tracing/` | Traced tool agent, span inspection, `mlflow.genai.evaluate` with built-in judges + trace-based scorers |
+| `04_inference_logging_rag/` | Inference table (simulated or real): parse payloads, errors/latency, empty retrieval, groundedness on logged rows |
+| `05_control_llm_costs/` | Token usage, prompt/output/model/caching levers, monthly projection, usage + billing system tables, serving modes |
+| `06_inference_tables_agent_monitoring/` | Enable inference tables (gated), traced app, registered monitoring scorers (gated), manual search_traces + evaluate |
+| `07_judges_requiring_ground_truth/` | Judges with vs without expectations; groundedness ≠ correctness demo; which judges per situation |
+| `08_ai_gateway_tracking/` | Audit AI Gateway config, configure inference table/usage/rate limits (gated), usage tables, 429 retry with backoff |
+| `09_custom_scorers/` | `@scorer` code, `Feedback`, expectations, trace and LLM-judge scorers, `Guidelines`, `make_judge`, scorer unit tests |
+| `10_sme_feedback/` | SME `log_feedback`/`log_expectation` on traces, labeling sessions, eval dataset + guidelines → v2, v1 vs v2 evaluation |
+
+Section 6 writes to schema `workspace.fde_eval_monitor` and MLflow experiments `/Users/<you>/fde_section6_*`.
+Endpoint-changing cells are off by default (`ENABLE_INFERENCE_TABLE`, `START_MONITORING`, `APPLY` = `False`).
+
 Defaults: catalog `workspace`, schema `fde_customer_support`, endpoint `databricks-meta-llama-3-3-70b-instruct` (edit `00_setup/config.py` or the widgets).
 Run `00_setup/create_sample_data` first; the other notebooks are independent.
 Each notebook calls the model endpoint directly with plain `mlflow.deployments` code (`client.predict(...)`), no shared helper functions.
@@ -82,4 +111,6 @@ databricks bundle run customer_support_ai_usecases   # Section 1 notebooks on se
 databricks bundle run data_preparation_usecases      # Section 2 notebooks on serverless
 databricks bundle run application_development_usecases   # Section 3 notebooks on serverless
 databricks bundle run assembling_deploying_usecases       # Section 4 notebooks on serverless
+databricks bundle run governance_usecases                  # Section 5 notebooks on serverless
+databricks bundle run evaluation_monitoring_usecases       # Section 6 notebooks on serverless
 ```

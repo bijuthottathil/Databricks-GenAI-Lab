@@ -150,3 +150,49 @@ resources:
         - task_key: s4_12_cicd_best_practices
           depends_on: [{ task_key: s4_11_persistent_memory_store }]
           notebook_task: { notebook_path: ./section4_assembling_deploying/12_cicd_best_practices/cicd_best_practices.py }
+    governance_usecases:
+      name: governance_usecases
+      tasks:
+        - task_key: s5_01_masking_guardrails_performance
+          notebook_task: { notebook_path: ./section5_governance/01_masking_guardrails_performance/masking_guardrails.py }
+        - task_key: s5_02_guardrails_malicious_inputs
+          depends_on: [{ task_key: s5_01_masking_guardrails_performance }]
+          notebook_task: { notebook_path: ./section5_governance/02_guardrails_malicious_inputs/malicious_input_guardrails.py }
+        - task_key: s5_03_legal_licensing_data_sources
+          depends_on: [{ task_key: s5_02_guardrails_malicious_inputs }]
+          notebook_task: { notebook_path: ./section5_governance/03_legal_licensing_data_sources/legal_licensing_sources.py }
+        - task_key: s5_04_problematic_text_mitigation
+          depends_on: [{ task_key: s5_03_legal_licensing_data_sources }]
+          notebook_task: { notebook_path: ./section5_governance/04_problematic_text_mitigation/problematic_text_mitigation.py }
+    evaluation_monitoring_usecases:
+      name: evaluation_monitoring_usecases
+      tasks:
+        - task_key: s6_01_select_llm_size_architecture
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/01_select_llm_size_architecture/select_llm_size_architecture.py }
+        - task_key: s6_02_key_metrics_by_scenario
+          depends_on: [{ task_key: s6_01_select_llm_size_architecture }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/02_key_metrics_by_scenario/key_metrics_by_scenario.py }
+        - task_key: s6_03_agent_eval_scoring_tracing
+          depends_on: [{ task_key: s6_02_key_metrics_by_scenario }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/03_agent_eval_scoring_tracing/agent_eval_scoring_tracing.py }
+        - task_key: s6_04_inference_logging_rag
+          depends_on: [{ task_key: s6_03_agent_eval_scoring_tracing }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/04_inference_logging_rag/inference_logging_rag.py }
+        - task_key: s6_05_control_llm_costs
+          depends_on: [{ task_key: s6_04_inference_logging_rag }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/05_control_llm_costs/control_llm_costs.py }
+        - task_key: s6_06_inference_tables_agent_monitoring
+          depends_on: [{ task_key: s6_05_control_llm_costs }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/06_inference_tables_agent_monitoring/inference_tables_agent_monitoring.py }
+        - task_key: s6_07_judges_requiring_ground_truth
+          depends_on: [{ task_key: s6_06_inference_tables_agent_monitoring }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/07_judges_requiring_ground_truth/judges_ground_truth.py }
+        - task_key: s6_08_ai_gateway_tracking
+          depends_on: [{ task_key: s6_07_judges_requiring_ground_truth }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/08_ai_gateway_tracking/ai_gateway_tracking.py }
+        - task_key: s6_09_custom_scorers
+          depends_on: [{ task_key: s6_08_ai_gateway_tracking }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/09_custom_scorers/custom_scorers.py }
+        - task_key: s6_10_sme_feedback
+          depends_on: [{ task_key: s6_09_custom_scorers }]
+          notebook_task: { notebook_path: ./section6_evaluation_monitoring/10_sme_feedback/sme_feedback.py }
