@@ -25,6 +25,24 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1: policy  ──┬──► Step 3: rule_checks()  → prints flags (not stored)
+# MAGIC Step 2: samples ──┘
+# MAGIC        └─────────────► Step 4: judge()        → assessment table ──► Step 6: fail counts
+# MAGIC ```
+# MAGIC - Steps 3 and 4 are **two independent graders** of the same data. Step 4 does *not* use Step 3's output;
+# MAGIC   Step 5 just compares them by eye.
+# MAGIC - Each `judge()` call sends the **RUBRIC** (how to grade) as the system message, and **policy + question + answer**
+# MAGIC   as the user message. The model returns JSON like `{"grounded": "fail", ..., "reason": "..."}`.
+# MAGIC - `planted_issue` (our answer key) is **never sent to the judge** – it's only kept in the results so you can check
+# MAGIC   whether the judge found the right problem.
+# MAGIC - Verdicts are lower-cased so Step 6's `"fail"` count is reliable, and a row whose reply isn't valid JSON is marked
+# MAGIC   `"error"` instead of stopping the whole loop.
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Step 1 – The reference policy (the "truth" the bot should use)
 # MAGIC **Why:** you can only judge whether an answer is *grounded* if you know what the source says.
 
@@ -143,10 +161,20 @@ def judge(question, answer):
     text = response["choices"][0]["message"]["content"]
     return json.loads(text[text.find("{"): text.rfind("}") + 1])
 
+CRITERIA = ["grounded", "correct", "complete", "relevant", "safe"]
+
 rows = []
 for sid, q, a, planted in samples:
-    v = judge(q, a)
-    rows.append((sid, planted, v.get("grounded"), v.get("correct"), v.get("complete"), v.get("relevant"), v.get("safe"), v.get("reason")))
+    # Only question + answer go to the judge – never the planted answer key.
+    try:
+        v = judge(q, a)
+    except Exception as e:
+        # Bad/missing JSON from the model: record it and carry on with the next row.
+        v = {c: "error" for c in CRITERIA}
+        v["reason"] = f"judge reply could not be parsed: {e}"
+    # Lower-case verdicts so "Fail"/"FAIL" are counted the same as "fail" in Step 6.
+    verdicts = [str(v.get(c, "missing")).strip().lower() for c in CRITERIA]
+    rows.append((sid, planted, *verdicts, v.get("reason")))
 
 assessment = spark.createDataFrame(rows, "id int, planted_issue string, grounded string, correct string, complete string, relevant string, safe string, reason string")
 display(assessment)
