@@ -19,6 +19,29 @@
 # MAGIC 2. **Expected queries** – short keyword searches or long, detailed questions?
 # MAGIC 3. **Optimisation strategy** – many small precise chunks (fine with a short-context model), or fewer big chunks
 # MAGIC    (needs a long-context model)? Also: speed, cost and storage.
+# MAGIC
+# MAGIC ### Key words used in this notebook
+# MAGIC | Word | Plain meaning |
+# MAGIC |---|---|
+# MAGIC | **Embedding / vector** | A list of numbers (here 1024) that represents the *meaning* of a text |
+# MAGIC | **Token** | A piece of a word; roughly 1 word ≈ 1.3 tokens |
+# MAGIC | **Context length** | The most tokens the embedding model reads from one input |
+# MAGIC | **Truncation** | Cutting off everything after the limit – the model never sees it |
+# MAGIC | **Cosine similarity** | How close two vectors are: ~1 = very similar meaning, ~0 = unrelated |
+# MAGIC | **Chunk** | A smaller piece of a document, embedded separately |
+# MAGIC
+# MAGIC **Analogy:** a reader who only reads the first page of every book. Ask them about chapter 14 and they'll say the
+# MAGIC book isn't relevant. That's a 512-token model on a long document.
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1 documents (short, medium, LONG with key fact at the end)   Step 2 queries (short, long)
+# MAGIC                       └───────────────────┬────────────────────────────┘
+# MAGIC Step 3  long query vs whole contract vs last paragraph, both models → shows truncation
+# MAGIC Step 4  rank the 3 documents for both queries, both models         → what users would get
+# MAGIC Step 5  fix #1: chunk the contract to fit 512 tokens, retry the small model
+# MAGIC Step 6  cost of each strategy (number of vectors, storage)        → no model calls
+# MAGIC ```
 
 # COMMAND ----------
 
@@ -27,6 +50,13 @@
 # MAGIC **What:** a short FAQ answer, a medium policy page, and a long warranty contract where the key fact
 # MAGIC (accidental damage cover) appears near the **end**.
 # MAGIC **Why put the fact at the end:** that's exactly what gets lost when a model truncates.
+# MAGIC
+# MAGIC **How the long document is built:** `filler * 30` repeats one generic sentence 30 times (~800 words of "legal
+# MAGIC text"), then Section 14 is added at the very end. `approx_tokens()` is a rough estimate (words × 1.3) – good enough
+# MAGIC to compare against 512 vs 8192.
+# MAGIC
+# MAGIC **How to read the output:** the FAQ is ~20 tokens, the returns policy ~100, and the warranty contract over 1000 –
+# MAGIC more than **double** the 512-token limit of `bge-large-en`.
 
 # COMMAND ----------
 
@@ -53,6 +83,9 @@ for name, text in documents.items():
 # MAGIC ### Step 2 – Sample expected queries
 # MAGIC **What:** a short keyword query and a long, detailed one.
 # MAGIC **Why:** queries must fit too. Short queries fit any model; very long queries (e.g. a pasted email) may not.
+# MAGIC
+# MAGIC **How to read the output:** both queries are well under 512 tokens, so here the *documents* are the problem, not
+# MAGIC the queries.
 
 # COMMAND ----------
 
@@ -76,6 +109,17 @@ for name, q in queries.items():
 # MAGIC
 # MAGIC **How to read:** look at the `whole_contract` column. A big gap between models = truncation is hurting the
 # MAGIC short-context model.
+# MAGIC
+# MAGIC **Code walk-through:**
+# MAGIC - `embed(model, texts)` sends a list of texts in **one** call and gets one vector per text. Dividing each vector by
+# MAGIC   its length ("normalising") means a simple dot product `v[0] @ v[1]` equals the cosine similarity.
+# MAGIC - We embed 3 texts per model: `v[0]` = long query, `v[1]` = whole contract, `v[2]` = just the Section 14 paragraph.
+# MAGIC - `last_paragraph_only` is the "best case" – what the score *could* be if the model saw Section 14 clearly.
+# MAGIC - The `try/except` records an error instead of stopping, because some endpoints **reject** too-long input
+# MAGIC   instead of silently truncating it. Either way, the 512-token model can't use the whole contract.
+# MAGIC
+# MAGIC **Columns:** `vector_size` should be 1024 for both. Compare `similarity_whole_contract` with
+# MAGIC `similarity_last_paragraph_only` – the bigger the drop, the more the model lost by not seeing the end.
 
 # COMMAND ----------
 
@@ -108,6 +152,13 @@ display(spark.createDataFrame(rows, "model string, vector_size int, similarity_w
 # MAGIC ### Step 4 – Retrieval test: which document does each model pick?
 # MAGIC **What:** for both queries, rank the 3 documents by similarity with each model.
 # MAGIC **Why:** this is what users experience. The correct document for both queries is `warranty_contract`.
+# MAGIC
+# MAGIC **Code walk-through:** embed the 3 documents once per model, embed each query, take dot products → one score per
+# MAGIC document; `argmax` picks the highest.
+# MAGIC
+# MAGIC **How to read the table:** `correct = true` means the model found the warranty contract. `all_scores` shows how
+# MAGIC close the race was. If `bge` picks the wrong document (or scores are very close), truncation is the reason: it
+# MAGIC only saw the generic filler text. If this cell errors for `bge`, that endpoint rejects long input – same lesson.
 
 # COMMAND ----------
 
@@ -130,6 +181,12 @@ display(spark.createDataFrame(rows, "model string, query string, top_document st
 # MAGIC model again.
 # MAGIC **Why:** this is the classic fix – if every chunk fits, nothing is truncated, and the small Section 14 chunk is a
 # MAGIC sharp match for the question. Often you get *better* precision than embedding one giant document.
+# MAGIC
+# MAGIC **Code walk-through:** split the contract into lists of 300 words (≈ 390 tokens, safely under 512), embed every
+# MAGIC chunk with the **small** model, score each chunk against the long query and pick the best.
+# MAGIC
+# MAGIC **How to read the output:** first line = how many chunks and the biggest size (must be < 512). Second line should
+# MAGIC end with `contains Section 14: True` – the short-context model now finds the answer, because nothing was cut off.
 
 # COMMAND ----------
 
@@ -150,6 +207,12 @@ print(f"Best chunk #{best} (score {scores[best]:.2f}) contains Section 14: {'Sec
 # MAGIC **What:** estimate how many vectors and how much storage each strategy needs for a larger library.
 # MAGIC **Why:** a long-context model with big chunks stores fewer vectors (cheaper index, faster search) but each vector
 # MAGIC "averages" more topics (less precise). Small chunks are precise but multiply storage and embedding calls.
+# MAGIC
+# MAGIC **The maths:** number of vectors = library tokens ÷ chunk size. Storage = vectors × 1024 numbers × 4 bytes
+# MAGIC (each number is a 32-bit float). No model calls – it's just arithmetic.
+# MAGIC
+# MAGIC **How to read the output:** small chunks → 125,000 vectors ≈ 512 MB; big chunks → 12,500 vectors ≈ 51 MB.
+# MAGIC 10× smaller chunks = 10× more vectors to store and search.
 
 # COMMAND ----------
 

@@ -22,6 +22,26 @@
 # MAGIC
 # MAGIC **In this notebook:** we measure 4 real models on the same tasks, then pick a winner for **two different
 # MAGIC applications** using weighted scores – and see that the winner changes.
+# MAGIC
+# MAGIC ### Key words used in this notebook
+# MAGIC | Word | Plain meaning |
+# MAGIC |---|---|
+# MAGIC | **Endpoint** | The URL/name you call to use a model on Databricks (e.g. `databricks-gemma-3-12b`) |
+# MAGIC | **Parameters (70B, 8B)** | The model's size in billions of learned numbers – bigger is usually smarter but slower and pricier |
+# MAGIC | **Latency** | Seconds from sending a request to getting the answer |
+# MAGIC | **Tokens** | Pieces of words; you pay per token and longer outputs take longer |
+# MAGIC | **Normalise** | Convert different units (seconds, %, size) to the same 0–1 scale |
+# MAGIC | **Weight** | How much an app cares about a metric; weights add up to 1.0 |
+# MAGIC | **Mixture-of-experts (MoE)** | A big model that only uses a small part of itself per token – large capacity, lower cost |
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1 candidates (4 models)      Step 2 classification_set + reasoning_question
+# MAGIC         └──────────────┬───────────────┘
+# MAGIC Step 3  call every model on every task → results (raw measurements per model)
+# MAGIC Step 4  add speed_score and cost_score to each row of results (0–1 scale)
+# MAGIC Step 5  apply each app's weights → ranking per app
+# MAGIC ```
 
 # COMMAND ----------
 
@@ -46,6 +66,9 @@ candidates = {
 # MAGIC **What:** 6 ticket-classification items (the label is the answer key) and 1 reasoning question.
 # MAGIC **Why both:** classification tests *accuracy & JSON reliability* (typical high-volume work); the reasoning question
 # MAGIC tests *thinking ability* (typical assistant work).
+# MAGIC
+# MAGIC **The maths answer worked out:** $1200 × 1.08 = $1296 with tax, minus $100 credit = **$1196**. A model that applies
+# MAGIC the credit *before* tax gets $1188 – a typical reasoning mistake this question is designed to catch.
 
 # COMMAND ----------
 
@@ -74,6 +97,19 @@ reasoning_answer = "1196"
 # MAGIC
 # MAGIC **Why `extract_text`:** some models return the answer as a list of parts (e.g. reasoning + text). This small
 # MAGIC function handles both shapes so every model is measured the same way.
+# MAGIC
+# MAGIC **Code walk-through:**
+# MAGIC 1. `call()` starts a timer, calls the model, stops the timer → latency. It reads `completion_tokens` from the
+# MAGIC    response's `usage` (falls back to a word count if the endpoint doesn't report it).
+# MAGIC 2. For each model, loop over the 6 tickets: ask for JSON, try to parse it. Parsed OK → `valid += 1`; category
+# MAGIC    equals the label → `correct += 1`. Not JSON → counts as wrong.
+# MAGIC 3. Ask the maths question once and check whether `1196` appears in the reply.
+# MAGIC 4. Save one row per model in `results`.
+# MAGIC
+# MAGIC **Model calls:** 4 models × 7 calls = 28 calls; it prints `done: <model>` as each finishes.
+# MAGIC
+# MAGIC **How to read the table:** one row per model. Accuracy and json_valid are 0–1 (1.0 = 6/6). Latency depends on
+# MAGIC load at that moment, so small differences aren't meaningful – look for big gaps.
 
 # COMMAND ----------
 
@@ -130,6 +166,15 @@ display(spark.createDataFrame(results))
 # MAGIC gets 1.0 and the slowest 0.0. We also add a **relative cost** score from model size (assumption: smaller = cheaper;
 # MAGIC check real prices on the pricing page for production decisions).
 # MAGIC **Why normalise:** you can't add "seconds" to "accuracy". Putting everything on 0–1 makes them comparable.
+# MAGIC
+# MAGIC **Worked example of the formula** `score = 1 - (value - min) / (max - min)`:
+# MAGIC latencies 0.5 s, 1.0 s, 2.5 s → min 0.5, max 2.5:
+# MAGIC - 0.5 s → 1 − 0/2 = **1.0** (fastest)
+# MAGIC - 1.0 s → 1 − 0.5/2 = **0.75**
+# MAGIC - 2.5 s → 1 − 2/2 = **0.0** (slowest)
+# MAGIC
+# MAGIC The `or 1` avoids dividing by zero if all values are equal. This cell adds two new keys to every row of `results`
+# MAGIC and prints nothing – the next step uses them.
 
 # COMMAND ----------
 
@@ -154,6 +199,13 @@ for r in results:
 # MAGIC
 # MAGIC **How to read:** the model with the highest weighted score is the best fit **for that app**. It's normal for the
 # MAGIC winners to differ – that's the whole point.
+# MAGIC
+# MAGIC **Worked example of a weighted score (App B):** a model with accuracy 1.0, json_valid 1.0, speed 0.4,
+# MAGIC cost 0.2, reasoning 1.0 →
+# MAGIC `0.3×1.0 + 0.1×1.0 + 0.1×0.4 + 0.0×0.2 + 0.5×1.0 = 0.94`.
+# MAGIC A model that got the maths wrong loses 0.5 straight away – so for App B, reasoning decides the winner.
+# MAGIC
+# MAGIC **Try it:** change the weights to match an app you know and re-run this cell – no new model calls needed.
 
 # COMMAND ----------
 

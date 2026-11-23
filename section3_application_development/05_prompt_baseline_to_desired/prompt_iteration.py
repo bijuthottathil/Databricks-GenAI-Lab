@@ -24,10 +24,40 @@
 # MAGIC | v2 | **Context** (the policy) + **instructions** (what to include) |
 # MAGIC | v3 | **Constraints** (length, what NOT to do) + **output format** (JSON) |
 # MAGIC | v4 | **Few-shot example** (show one perfect answer) |
+# MAGIC
+# MAGIC ### Key words used in this notebook
+# MAGIC | Word | Plain meaning | Example here |
+# MAGIC |---|---|---|
+# MAGIC | **Baseline** | The first, simplest prompt – our "before" picture | v0 |
+# MAGIC | **Desired output** | A written description of the perfect answer | the 6 points above |
+# MAGIC | **System prompt / role** | Instructions about *who* the model is | "You are a calm, professional support agent…" |
+# MAGIC | **Context** | Facts the model needs but doesn't know | the 15-day replacement policy |
+# MAGIC | **Constraint** | A limit or a "do NOT" rule | "at most 60 words", "do NOT promise a refund" |
+# MAGIC | **Output format** | The exact shape of the answer | `{"reply": ..., "next_step": ...}` |
+# MAGIC | **Few-shot** | Showing example answers inside the prompt | the keyboard example in v4 |
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1  customer_message, policy, run()          ← the same input is used for every version
+# MAGIC Step 2  checks(), show(), scores = {}            ← the "marking scheme" (6 True/False tests)
+# MAGIC v0 → v1 → v2 → v3 → v4                           ← each calls run(), then show() adds a row to scores
+# MAGIC Step 3  table from scores                        ← side-by-side comparison of all versions
+# MAGIC ```
+# MAGIC Every version is graded by the **same** `checks()` function, so the scores are comparable.
 
 # COMMAND ----------
 
-# MAGIC %md ### Step 1 – The input and a function to call the model
+# MAGIC %md
+# MAGIC ### Step 1 – The input and a function to call the model
+# MAGIC **What:**
+# MAGIC - `customer_message` – the angry message we must answer (headphones died after **10 days**, wants money back).
+# MAGIC - `policy` – the rule that applies: free **replacement** within 15 days; refunds only for unopened returns.
+# MAGIC   So the correct answer is "we'll replace them", **not** "here's your money back".
+# MAGIC - `run(system, user)` – the plain model call. `system` is optional: v0 sends no system prompt at all
+# MAGIC   (`None`), later versions send one.
+# MAGIC
+# MAGIC **Why `temperature = 0.0`:** keeps the output stable, so any change you see comes from *your prompt change*, not
+# MAGIC randomness.
 
 # COMMAND ----------
 
@@ -41,6 +71,7 @@ customer_message = "These headphones died after 10 days. This is ridiculous, I w
 policy = "Defective products are replaced free within 15 days of delivery. Refunds are only for returns within 30 days of unopened items."
 
 def run(system, user):
+    # Build the message list: add a system message only if one was given
     messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": user}]
     response = client.predict(endpoint=ENDPOINT, inputs={"messages": messages, "temperature": 0.0, "max_tokens": 300})
     return response["choices"][0]["message"]["content"].strip()
@@ -51,6 +82,25 @@ def run(system, user):
 # MAGIC ### Step 2 – Automatic checks for the 6 target properties
 # MAGIC **What:** small Python tests, one per requirement. Each returns True/False.
 # MAGIC **Why:** "it looks better" is opinion; a score out of 6 lets you *prove* each prompt change helped.
+# MAGIC
+# MAGIC **What each check looks for:**
+# MAGIC | Check | Passes when… |
+# MAGIC |---|---|
+# MAGIC | `apology` | the reply contains "sorry" or "apologi…" |
+# MAGIC | `correct_policy` | the reply mentions "15 days" **and** "replace" |
+# MAGIC | `next_step` | the output asks for a photo / picture / video |
+# MAGIC | `max_60_words` | the reply has 60 words or fewer |
+# MAGIC | `no_false_promise` | no "refund / compensation / money back", unless the reply says "not" (e.g. "we can't offer a refund") |
+# MAGIC | `json_format` | the output is valid JSON with both `reply` and `next_step` keys |
+# MAGIC
+# MAGIC **How it handles non-JSON output:** early versions return plain text, so `json.loads` fails. The `except` branch
+# MAGIC then grades the whole text as the reply and marks `json_format` as False.
+# MAGIC
+# MAGIC **Honest limitation:** these are simple keyword checks, so they can be fooled (e.g. "not" anywhere in the text
+# MAGIC passes `no_false_promise`). They're good enough to see the trend; in real projects you'd add an LLM judge
+# MAGIC (see notebook 3.2) or human review.
+# MAGIC
+# MAGIC `show()` prints the output, the score out of 6 and a ✓/✗ per check; `scores` collects the results for Step 3.
 
 # COMMAND ----------
 
@@ -87,6 +137,10 @@ scores = {}
 # MAGIC **What:** just the customer's message.
 # MAGIC **Expect:** a generic, possibly long reply; it may promise a refund (the customer asked for one) and won't know the
 # MAGIC 15-day policy.
+# MAGIC
+# MAGIC **How to read the output:** look at the ✓/✗ line. A low score (often 0–2 out of 6) is normal here – this is the
+# MAGIC "before" picture we're going to improve. If it mentions a refund, that's the model trying to please the customer
+# MAGIC without knowing our policy.
 
 # COMMAND ----------
 
@@ -99,6 +153,9 @@ scores["v0 baseline"] = show("v0 baseline", v0)
 # MAGIC ### v1 – Add a role (system prompt)
 # MAGIC **What:** tell the model *who it is* and *how to behave*.
 # MAGIC **Why:** roles set tone and professionalism. **Expect:** more polite, but still no policy knowledge.
+# MAGIC
+# MAGIC **What changed vs v0:** only the system prompt. The user message is identical. Typically `apology` turns ✓, but
+# MAGIC `correct_policy` stays ✗ – a role can change *how* the model speaks, not *what it knows*.
 
 # COMMAND ----------
 
@@ -113,6 +170,9 @@ scores["v1 + role"] = show("v1 + role", v1)
 # MAGIC **What:** paste the policy and list what the reply must contain.
 # MAGIC **Why:** the model can't follow a policy it hasn't seen. Explicit instructions ("apologise", "give one next step")
 # MAGIC turn hopes into requirements. **Expect:** correct policy and a next step; length/format still uncontrolled.
+# MAGIC
+# MAGIC **What changed vs v1:** the user message now has three labelled parts – `Policy`, `Customer message`, and a
+# MAGIC bullet list of what to write. Same system prompt as v1. Look for `correct_policy` and `next_step` turning ✓.
 
 # COMMAND ----------
 
@@ -134,6 +194,9 @@ scores["v2 + context & instructions"] = show("v2 + context & instructions", v2)
 # MAGIC **What:** a word limit, a "do NOT" rule, and an exact JSON shape.
 # MAGIC **Why:** negative instructions prevent known failure modes (promising refunds); a fixed format lets code use the
 # MAGIC output. **Expect:** short, safe, machine-readable output.
+# MAGIC
+# MAGIC **What changed vs v2:** `v3_user = v2_user + Rules` – we keep everything from v2 and add a `Rules` block at the
+# MAGIC end. Look for `max_60_words`, `no_false_promise` and `json_format` turning ✓. The output should now be pure JSON.
 
 # COMMAND ----------
 
@@ -152,6 +215,10 @@ scores["v3 + constraints & format"] = show("v3 + constraints & format", v3)
 # MAGIC **What:** show the model one example of a *perfect* answer for a different case.
 # MAGIC **Why:** examples communicate style, length and structure better than rules alone, and make outputs more
 # MAGIC consistent across many customers. **Expect:** the most consistent, on-target output.
+# MAGIC
+# MAGIC **What changed vs v3:** the example (a *different* product – a keyboard) is placed **before** the v3 prompt.
+# MAGIC Using a different case teaches the *pattern* without letting the model copy the answer word-for-word.
+# MAGIC If v3 already scored 6/6, v4 may look the same here – its real value shows when you test many different customers.
 
 # COMMAND ----------
 

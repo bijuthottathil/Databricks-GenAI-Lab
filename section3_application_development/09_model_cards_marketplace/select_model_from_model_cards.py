@@ -21,6 +21,30 @@
 # MAGIC
 # MAGIC **Our requirement (the "job description"):** summarise **German** customer reviews into one English sentence,
 # MAGIC for a **commercial** product, at high volume (so ≤ 15B parameters), inputs up to ~6,000 tokens.
+# MAGIC
+# MAGIC **Analogy:** hiring. The model card is the CV. First you drop CVs that miss a must-have (no work permit = wrong
+# MAGIC license, doesn't speak German = wrong language). Then you rank the rest. Then you interview the top one (test it
+# MAGIC on your own data).
+# MAGIC
+# MAGIC ### How our requirement maps to card fields
+# MAGIC | Requirement | Card field we check | Rule in code |
+# MAGIC |---|---|---|
+# MAGIC | It must summarise | `task` / `pipeline_tag` | `summarization` or `text-generation` |
+# MAGIC | Commercial product | `license` | must allow commercial use |
+# MAGIC | German input | `language` | must include `de` |
+# MAGIC | High volume / low cost | `parameters` | ≤ 15B |
+# MAGIC | Inputs up to ~6,000 tokens | `context_length` | ≥ 6000 |
+# MAGIC | Good quality | evaluation results (`rouge-l`) | rank by highest |
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1  parse ONE raw card (YAML)        → see what metadata looks like
+# MAGIC Step 2  cards = 7 example cards          → our pretend "hub"
+# MAGIC Step 3  must-have filter on cards        → decisions (KEEP / REJECT + reasons)
+# MAGIC Step 4  rank the KEEPs by ROUGE-L         → shortlist winner
+# MAGIC Step 5  list REAL models in this workspace (serving endpoints, system.ai) – no model calls
+# MAGIC ```
+# MAGIC This notebook makes **no LLM calls** – model selection from cards is just reading and filtering metadata.
 
 # COMMAND ----------
 
@@ -29,6 +53,13 @@
 # MAGIC **What:** Hugging Face model cards are a `README.md` that starts with a **YAML** block of metadata between `---`
 # MAGIC lines, followed by human-written text. Below is an example card (a made-up model, for practice).
 # MAGIC **Why parse it:** with many candidates you filter on the structured fields automatically.
+# MAGIC
+# MAGIC **Code walk-through:** `example_card.split("---")[1]` takes the text between the first two `---` lines (the YAML
+# MAGIC block). `yaml.safe_load` turns it into a Python dictionary. The text after the second `---` (description and
+# MAGIC "Limitations") is for humans – always read it too.
+# MAGIC
+# MAGIC **How to read the output:** a dict like `{'license': 'apache-2.0', 'language': ['en', 'de', 'fr'], ...}` – now
+# MAGIC code can check `'de' in metadata['language']`.
 
 # COMMAND ----------
 
@@ -63,6 +94,16 @@ print(metadata)
 # MAGIC ### Step 2 – A small "hub" of candidate model cards
 # MAGIC **What:** 7 example cards (made-up names, realistic fields) as a table.
 # MAGIC **Why made-up:** so the exercise is about *reading metadata*, not memorising real models' current specs.
+# MAGIC
+# MAGIC **Each card is a trap for one requirement** – try to spot which before running Step 3:
+# MAGIC | Card | Trap |
+# MAGIC |---|---|
+# MAGIC | giant-llm-180b | best score, but far too big |
+# MAGIC | research-summarizer-3b | non-commercial license (`cc-by-nc` = "NC" means non-commercial) |
+# MAGIC | english-summarizer-1b | no German, short context |
+# MAGIC | multilingual-embed-0.5b | embeddings model – can't write text at all |
+# MAGIC | summarizer-v1-6b | context only 1024 tokens |
+# MAGIC | multilingual-summarizer-7b / german-chat-12b | the ones that should survive |
 
 # COMMAND ----------
 
@@ -86,6 +127,13 @@ display(cards_df)
 # MAGIC ### Step 3 – Filter on hard requirements (must-haves) and record *why* each model is rejected
 # MAGIC **What:** check each card against our must-haves. A model failing any must-have is out, however good its score.
 # MAGIC **Why record reasons:** you'll need to explain the choice to your team (and auditors).
+# MAGIC
+# MAGIC **Code walk-through:** for every card, start with an empty `reasons` list and add a reason for each failed rule.
+# MAGIC Empty list at the end → `KEEP`; otherwise `REJECT` with all reasons joined by `;`. A card can fail several rules.
+# MAGIC
+# MAGIC **How to read the table:** 2 rows should say KEEP (the 7B summarizer and the 12B German chat model); every REJECT
+# MAGIC row explains itself in the `reasons` column. Notice the 180B model is rejected even though it has the highest
+# MAGIC ROUGE-L – must-haves come before scores.
 
 # COMMAND ----------
 
@@ -118,6 +166,12 @@ display(spark.createDataFrame(decisions, "name string, decision string, reasons 
 # MAGIC model's summary overlaps with human-written summaries; higher is better), then prefer a dedicated
 # MAGIC summarisation model over a general chat model.
 # MAGIC **Why:** benchmark scores only matter *after* the must-haves are met, and only for metrics that match your task.
+# MAGIC
+# MAGIC **Code walk-through:** keep only `KEEP` rows, then sort by two keys: highest ROUGE-L first (the minus sign sorts
+# MAGIC descending), and on a tie, `summarization` models before general chat models.
+# MAGIC
+# MAGIC **How to read the output:** `acme/multilingual-summarizer-7b` (0.41) should rank above `acme/german-chat-12b`
+# MAGIC (0.40). The winner is a **shortlist**, not a final decision – benchmarks were measured on someone else's data.
 
 # COMMAND ----------
 
@@ -135,6 +189,14 @@ print(f"\nShortlist winner: {ranked[0][0]} → next step: test it on 20–50 of 
 # MAGIC - **Serving endpoints** – each has a *task* type (`llm/v1/chat`, `llm/v1/embeddings`…), which is metadata too.
 # MAGIC - **`system.ai` catalog** in Unity Catalog – curated models with descriptions (their "cards").
 # MAGIC **Why:** in practice you'll start from what's already available and governed in your workspace.
+# MAGIC
+# MAGIC **Code walk-through:** `WorkspaceClient()` uses your notebook login. `serving_endpoints.list()` returns every
+# MAGIC endpoint; we keep the Databricks-hosted ones (names start with `databricks-`) and show their task type.
+# MAGIC
+# MAGIC **How to read the output:** `llm/v1/chat` = chat models (e.g. Llama, Gemma), `llm/v1/embeddings` = embedding
+# MAGIC models (e.g. gte, bge). The task type is the first filter, just like `pipeline_tag` on a Hugging Face card.
+# MAGIC The next cell lists `system.ai` models with their descriptions; if your workspace can't access that catalog it
+# MAGIC prints a message instead of failing.
 
 # COMMAND ----------
 

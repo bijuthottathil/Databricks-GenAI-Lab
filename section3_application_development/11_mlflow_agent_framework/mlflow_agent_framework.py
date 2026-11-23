@@ -16,11 +16,39 @@
 # MAGIC | Deploy with a REST API, Review App and monitoring | `databricks.agents.deploy()` |
 # MAGIC
 # MAGIC **Lifecycle we follow:** build tools → write the agent → trace it → log it → load & test → evaluate → (register & deploy).
+# MAGIC
+# MAGIC **Analogy:** a new support employee (the LLM) with access to two systems (the tools: order lookup, policy book).
+# MAGIC They decide *which* system to check, read the result, and then answer. MLflow is the CCTV + the HR file: it records
+# MAGIC what they did (tracing), packages them for a new office (logging), and runs their exam (evaluation).
+# MAGIC
+# MAGIC ### Key words used in this notebook
+# MAGIC | Word | Plain meaning |
+# MAGIC |---|---|
+# MAGIC | **Tool** | A normal Python function the LLM may ask us to run (e.g. `get_order("1002")`) |
+# MAGIC | **Tool spec** | A JSON description of a tool (name, purpose, arguments) – the "menu" the LLM chooses from |
+# MAGIC | **Tool call** | The LLM's request: "please run `get_order` with `order_id=1002`" – **our code** runs it, not the LLM |
+# MAGIC | **Agent loop** | Ask LLM → run requested tools → give results back → repeat until it answers |
+# MAGIC | **Trace / span** | A recording of one request; each LLM call or tool call inside it is a span |
+# MAGIC | **Log a model** | Save the agent as a versioned package in MLflow |
+# MAGIC | **Scorer** | A function that grades an answer during evaluation |
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1  ORDERS, POLICIES (the data)          ← used by the tools
+# MAGIC Step 2  get_order(), get_policy() + TOOL_SPECS ← what the agent can use
+# MAGIC Step 3  SupportAgent class → agent            ← the agent loop, uses Step 2
+# MAGIC Step 4  agent.predict(question)               ← try it, look at the trace
+# MAGIC Step 5  log_model(agent) → logged.model_uri   ← save it
+# MAGIC Step 6  load_model(model_uri).predict(...)    ← prove the saved package works
+# MAGIC Step 7  mlflow.genai.evaluate(...)            ← grade it on 3 questions
+# MAGIC Step 8  register + deploy (shown only)
+# MAGIC ```
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Step 0 – Install a recent MLflow (ResponsesAgent and `mlflow.genai` need MLflow 3)
+# MAGIC **Note:** `%restart_python` clears all variables, so always run this cell first and then the rest in order.
 
 # COMMAND ----------
 
@@ -32,6 +60,9 @@
 # MAGIC %md
 # MAGIC ### Step 1 – Data the tools will use
 # MAGIC **What:** a small orders "database" and policy book, plus the model endpoint name.
+# MAGIC
+# MAGIC **Why plain dictionaries:** to keep the focus on the agent. In a real app the tools would query Delta tables,
+# MAGIC Vector Search or an API – the agent code wouldn't change, only the tool functions.
 
 # COMMAND ----------
 
@@ -57,6 +88,18 @@ POLICIES = {
 # MAGIC so later you can see *exactly* which tools the agent used and why an answer came out the way it did.
 # MAGIC **Production tip:** tools can also be **Unity Catalog functions** (SQL/Python functions governed in UC) so they're
 # MAGIC shareable and permission-controlled.
+# MAGIC
+# MAGIC **Two parts per tool – both are needed:**
+# MAGIC | Part | Who reads it | Example |
+# MAGIC |---|---|---|
+# MAGIC | The Python function | **our code** runs it | `get_order("1002")` → `{"product": "SoundMax Headphones", ...}` |
+# MAGIC | The tool spec (in `TOOL_SPECS`) | **the LLM** reads it to decide | name `get_order`, "Look up an order's…", needs `order_id` |
+# MAGIC
+# MAGIC `TOOL_FUNCTIONS` links the name the LLM uses to the real function, so the agent can run whatever tool was requested.
+# MAGIC The `enum` in `get_policy` limits `topic` to three allowed values, so the LLM can't ask for a topic that doesn't
+# MAGIC exist. Good descriptions matter: the LLM picks tools **only** from their name and description.
+# MAGIC
+# MAGIC This cell only defines things – it prints nothing.
 
 # COMMAND ----------
 
@@ -96,6 +139,22 @@ TOOL_SPECS = [
 # MAGIC
 # MAGIC **Why `ResponsesAgent`:** it gives the agent a standard input/output format (OpenAI "Responses" style), so the
 # MAGIC same code works in the notebook, on a serving endpoint, in AI Playground and in the Review App.
+# MAGIC
+# MAGIC **Example of the loop for "Order 1002 still hasn't arrived…":**
+# MAGIC ```
+# MAGIC round 1  LLM → tool_calls: get_order(order_id="1002"), get_policy(topic="shipping")
+# MAGIC          code runs both, appends results as "tool" messages
+# MAGIC round 2  LLM sees: Shipped, 5 days late + "$10 store credit" policy → replies with text → STOP, return answer
+# MAGIC ```
+# MAGIC
+# MAGIC **Code walk-through of `predict()`:**
+# MAGIC - Build `messages`: our system prompt + the user's messages from `request.input`.
+# MAGIC - `call_llm()` sends messages **and** `TOOL_SPECS`. The reply has either `tool_calls` or plain `content`.
+# MAGIC - Tool calls: first append the assistant's request (the model must see what it asked), then for each call
+# MAGIC   parse the JSON `arguments`, run the matching function, and append the result with the same `tool_call_id` (that's
+# MAGIC   how the model matches each result to its request).
+# MAGIC - `create_text_output_item` wraps the final text in the standard Responses format.
+# MAGIC - `call_llm` creates the client *inside* the method so the saved agent doesn't try to store a live connection.
 
 # COMMAND ----------
 
@@ -144,6 +203,12 @@ agent = SupportAgent()
 # MAGIC **What:** ask a question that needs **both** tools (order status + shipping policy).
 # MAGIC **How to read the trace:** below the cell output, MLflow shows a **Trace** panel. Expand it: you'll see the LLM call,
 # MAGIC then `get_order` and `get_policy` spans with their inputs/outputs, then the final LLM call. This is how you debug agents.
+# MAGIC
+# MAGIC **About `answer_text()`:** the response is a nested structure (`output` → list of items → `content` → `text`).
+# MAGIC This small function digs out the final text so we can print it.
+# MAGIC
+# MAGIC **Expected answer:** order 1002 (SoundMax Headphones) is shipped but 5 days late, so it qualifies for an
+# MAGIC investigation and a $10 store credit. If the answer lacks those facts, the trace shows whether the agent skipped a tool.
 
 # COMMAND ----------
 
@@ -166,6 +231,9 @@ print(answer_text(response))
 # MAGIC
 # MAGIC **Why:** a logged model is a versioned, reproducible package. Production teams usually log agents
 # MAGIC **"from code"** (`python_model="agent.py"`); for learning we log the object directly.
+# MAGIC
+# MAGIC **How to read the output:** a URI like `models:/m-abc123…`. That's the address of the saved package; Step 6 loads
+# MAGIC it from there. You can also see it in **Experiments → fde_agent_framework → support_agent_v1**.
 
 # COMMAND ----------
 
@@ -189,6 +257,9 @@ print("Logged model URI:", logged.model_uri)
 # MAGIC %md
 # MAGIC ### Step 6 – Load the logged agent back and test it (what serving will do)
 # MAGIC **Why:** proves the package works on its own, not just inside this notebook's memory.
+# MAGIC
+# MAGIC **Expected answer:** something like "Most products can be returned within 30 days of delivery." – the agent
+# MAGIC should call `get_policy(topic="returns")` (check the trace).
 
 # COMMAND ----------
 
@@ -203,6 +274,17 @@ print(answer_text(loaded.predict({"input": [{"role": "user", "content": "What is
 # MAGIC checks those facts. Results (and a trace per question) appear in the experiment's **Evaluations** tab.
 # MAGIC **Why:** before deploying, prove the agent answers correctly. You can add built-in LLM judges such as
 # MAGIC `Correctness()` or `RelevanceToQuery()` from `mlflow.genai.scorers` for open-ended quality.
+# MAGIC
+# MAGIC **How the pieces fit:**
+# MAGIC - `eval_data` – each row has `inputs` (passed to `predict_fn` as arguments, so the key `question` becomes the
+# MAGIC   parameter `question`) and `expectations` (the answer key, passed to scorers).
+# MAGIC - `predict_fn(question)` – runs the agent and returns the answer text.
+# MAGIC - `@scorer contains_expected_facts` – gets the agent's `outputs` and the row's `expectations`; returns 1.0 if every
+# MAGIC   required fact is in the answer.
+# MAGIC
+# MAGIC **How to read the output:** a metrics dict, e.g. `{'contains_expected_facts/mean': 1.0}` = all 3 passed. Open the
+# MAGIC experiment's **Evaluations** tab to see each question, answer, score and trace. The `try/except` prints a message
+# MAGIC instead of failing if your MLflow version doesn't support `mlflow.genai`.
 
 # COMMAND ----------
 

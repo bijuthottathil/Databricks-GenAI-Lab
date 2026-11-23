@@ -26,6 +26,28 @@
 # MAGIC
 # MAGIC **In this notebook:** Part A evaluates two bot versions offline and makes a release decision. Part B monitors 14 days
 # MAGIC of (simulated) production logs and finds a problem evaluation could not have seen.
+# MAGIC
+# MAGIC ### Key words used in this notebook
+# MAGIC | Word | Plain meaning |
+# MAGIC |---|---|
+# MAGIC | **Ground truth** | The known correct answer, written by a person |
+# MAGIC | **Evaluation set** | A fixed list of test questions + their ground truth |
+# MAGIC | **Regression** | Something that worked in the old version but is broken in the new one |
+# MAGIC | **Quality gate** | A pass/fail rule a new version must meet before release |
+# MAGIC | **Inference table** | A Delta table where a serving endpoint automatically logs every request and response |
+# MAGIC | **Proxy metric** | Something measurable that hints at quality when you don't know the right answer (👎 rate, latency) |
+# MAGIC | **Drift** | Real traffic slowly changing (new topics, new wording) compared to what you tested |
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC PART A (evaluation)                         PART B (monitoring)
+# MAGIC A1 eval_set (6 questions + v1/v2 answers)   B1 prod logs (14 days, simulated) → production_logs view
+# MAGIC A2 score each answer → rows, accuracies     B2 daily metrics from the logs → daily
+# MAGIC A3 quality gate → ship / don't ship         B3 compare daily with THRESHOLDS → alerts
+# MAGIC                                             B4 slice by topic → find the cause
+# MAGIC                                             B5 topics missing from eval_set → feed back to Part A
+# MAGIC ```
+# MAGIC No model calls in this notebook – answers and logs are pre-made so you can focus on the *process*.
 
 # COMMAND ----------
 
@@ -35,6 +57,9 @@
 # MAGIC **What:** 6 questions with the fact a correct answer must contain, and the (pre-recorded) answers from bot **v1** and
 # MAGIC a new candidate **v2**.
 # MAGIC **Why pre-recorded:** to focus on the *process*. In practice `mlflow.genai.evaluate` calls your app for you.
+# MAGIC
+# MAGIC **Spot the difference yourself:** v1 misses the $10 credit (question 2) and wrongly says opened software can be
+# MAGIC returned (question 5). v2 gets both right.
 
 # COMMAND ----------
 
@@ -60,6 +85,10 @@ eval_set = [
 # MAGIC ### Step A2 – Score both versions against the ground truth
 # MAGIC **What:** `correct` = the answer contains the required fact. We compute accuracy per version.
 # MAGIC **Why this is possible only in evaluation:** we *know* the right answers here. In production we won't.
+# MAGIC
+# MAGIC **How to read the output:** a table with ✓/✗ per question for each version, then
+# MAGIC `v1 accuracy: 67%   v2 accuracy: 100%`. (The check is a simple "does the fact appear" test; for real apps use an
+# MAGIC LLM judge such as MLflow's `Correctness`.)
 
 # COMMAND ----------
 
@@ -78,6 +107,12 @@ print(f"v1 accuracy: {v1_acc:.0%}   v2 accuracy: {v2_acc:.0%}")
 # MAGIC %md
 # MAGIC ### Step A3 – Release decision (a "quality gate")
 # MAGIC **Rule:** ship v2 only if it reaches ≥ 90% accuracy **and** is not worse than v1 on any question (no regressions).
+# MAGIC
+# MAGIC **Why check regressions separately:** a new version can have higher accuracy overall and still break a question
+# MAGIC that used to work – users notice that. `regressions` lists questions where v1 was right and v2 is wrong.
+# MAGIC
+# MAGIC **How to read the output:** `DECISION: ✅ ship v2 | regressions: none`. Evaluation said yes – but watch what
+# MAGIC Part B finds after release.
 
 # COMMAND ----------
 
@@ -94,6 +129,17 @@ print("DECISION:", "✅ ship v2" if ship else "❌ do not ship v2", "| regressio
 # MAGIC tokens used, errors, and user feedback (👍 = 1, 👎 = 0, or none).
 # MAGIC **What we planted:** from day 8, users start asking about **international shipping** – a topic the eval set never
 # MAGIC covered – and the bot handles it badly (more 👎, longer answers, slower).
+# MAGIC
+# MAGIC **How the fake data is generated (40 requests per day):**
+# MAGIC | | Normal topics | International shipping (from day 8, ~35% of traffic) |
+# MAGIC |---|---|---|
+# MAGIC | latency | ~1.2 s | ~2.8 s |
+# MAGIC | tokens | ~180 | ~420 |
+# MAGIC | error chance | 1% | 6% |
+# MAGIC | 👎 chance (when rated) | 10% | 60% |
+# MAGIC
+# MAGIC `random.gauss(mean, spread)` adds realistic noise; `random.seed(42)` makes the "random" data the same on every run.
+# MAGIC Feedback is `None` about 2 out of 3 times – most real users never click 👍/👎.
 
 # COMMAND ----------
 
@@ -127,6 +173,9 @@ display(prod.limit(10))
 # MAGIC **Why these metrics:** none needs a "correct answer" – they come straight from the logs. That's what makes them
 # MAGIC usable in production.
 # MAGIC **How to read:** look for the jump around **2026-11-08**. Switch the result to a line chart to see it clearly.
+# MAGIC
+# MAGIC **SQL walk-through:** `percentile(latency_s, 0.95)` = p95 latency; `avg(CAST(error AS INT))` = share of errors
+# MAGIC (true=1, false=0); `1 - avg(feedback)` = 👎 rate, because 👍=1 and 👎=0 and `avg` skips the `NULL` (unrated) rows.
 
 # COMMAND ----------
 
@@ -149,6 +198,9 @@ display(daily)
 # MAGIC ### Step B3 – Alerts: compare each day with agreed thresholds
 # MAGIC **What:** flag any day that breaks a limit. In Databricks you'd put the query above in a **SQL alert** or a
 # MAGIC **Lakehouse Monitoring** monitor and get notified automatically.
+# MAGIC
+# MAGIC **How to read the output:** days from 2026-11-01 to 11-07 should have no alerts; from 2026-11-08 onwards most days
+# MAGIC break the latency and/or 👎 limits. The exact numbers per day vary because of the random noise.
 
 # COMMAND ----------
 
@@ -166,6 +218,9 @@ display(spark.createDataFrame(alerts or [("none", "no alerts")], "date string, a
 # MAGIC ### Step B4 – Find *why*: topic drift
 # MAGIC **What:** compare the mix of topics before and after the problems started, with their 👎 rates.
 # MAGIC **Why:** monitoring tells you *something* changed; slicing by topic tells you *what*. Here a brand-new topic appears.
+# MAGIC
+# MAGIC **How to read the output:** in week 2, "international shipping" is the biggest topic with a high 👎 rate, while
+# MAGIC the old topics stay low. That's the cause: not a broken bot, but a **new kind of question** it was never tested on.
 
 # COMMAND ----------
 

@@ -24,6 +24,32 @@
 # MAGIC
 # MAGIC **This notebook:** creates sample tables, shows how to call a Genie Space from code, wraps it as an agent, and builds a
 # MAGIC supervisor. If you don't have a Genie Space yet, a clearly-labelled **stand-in** (LLM-generated SQL) lets every cell run.
+# MAGIC
+# MAGIC **Analogy:** a team lead (supervisor) with two specialists – a data analyst (Genie, knows the database) and a
+# MAGIC policy expert (knows the handbook). The lead splits the customer's question, asks each specialist their part, and
+# MAGIC writes one reply.
+# MAGIC
+# MAGIC ### Key words used in this notebook
+# MAGIC | Word | Plain meaning |
+# MAGIC |---|---|
+# MAGIC | **Genie Space** | A Genie "room" set up for specific tables, with instructions written by the data owners |
+# MAGIC | **Conversation API** | The REST/SDK way for code to ask Genie questions |
+# MAGIC | **Attachment** | A piece of Genie's reply: a text answer and/or the SQL query it wrote |
+# MAGIC | **Specialist agent** | An agent that does one kind of job well (data or policy) |
+# MAGIC | **Supervisor** | The agent that plans, routes sub-questions to specialists, and combines their answers |
+# MAGIC | **Routing** | Deciding which specialist should handle a question |
+# MAGIC | **Stand-in** | A simple replacement used here when no Genie Space is set up |
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1  create tables products, orders            ← the data Genie queries
+# MAGIC Step 2  genie_space_id widget                     ← empty = use the stand-in
+# MAGIC Step 3  ask_genie()       ─┐
+# MAGIC Step 4  standin_genie()   ─┴─► data_agent()       ← picks one based on the widget
+# MAGIC Step 5  policy_agent()                            ← answers from POLICY_DOCS
+# MAGIC Step 6  supervisor(): ROUTER plan → data_agent / policy_agent per task → final combined answer
+# MAGIC Step 7  supervisor() on 3 more requests
+# MAGIC ```
 
 # COMMAND ----------
 
@@ -31,6 +57,13 @@
 # MAGIC ### Step 1 – Create the sample tables Genie will query
 # MAGIC **What:** `products` and `orders` Delta tables in `workspace.fde_app_dev`, with column comments.
 # MAGIC **Why comments:** Genie (and any LLM writing SQL) uses table and column descriptions to understand the data.
+# MAGIC
+# MAGIC **Remember these facts to check answers later:**
+# MAGIC - Orders **more than 3 days late**: 5003 (5 days) and 5004 (4 days) → **2 orders**.
+# MAGIC - Revenue (quantity × price) by category: Laptops 3 × 1200 = **3600**, Audio 9 × 150 = **1350**, Monitors 2 × 400 =
+# MAGIC   **800**, Accessories 3 × 75 = **225**.
+# MAGIC
+# MAGIC `mode("overwrite")` means re-running this cell replaces the tables rather than adding duplicate rows.
 
 # COMMAND ----------
 
@@ -65,6 +98,9 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.orders"))
 # MAGIC 5. Copy the **space ID** from the URL (`.../genie/rooms/<SPACE_ID>`) into the widget at the top of this notebook.
 # MAGIC
 # MAGIC Leave the widget empty to use the stand-in data agent instead.
+# MAGIC
+# MAGIC **About the widget:** the next cell adds a text box at the top of the notebook. After pasting a space ID, re-run
+# MAGIC from this cell down. The printed line tells you which path will be used.
 
 # COMMAND ----------
 
@@ -85,6 +121,12 @@ print("Using Genie Space:", GENIE_SPACE_ID or "(none – stand-in data agent wil
 # MAGIC `GET .../conversations/{conversation_id}/messages/{message_id}`, then
 # MAGIC `GET .../messages/{message_id}/attachments/{attachment_id}/query-result`.
 # MAGIC Follow-up questions in the same conversation use `create_message_and_wait(space_id, conversation_id, text)`.
+# MAGIC
+# MAGIC **Code walk-through of `ask_genie()`:** send the question → loop over the attachments: copy any text answer; for a
+# MAGIC query attachment copy the SQL and fetch its result rows. It returns one tidy dict:
+# MAGIC `{"question", "sql", "text", "rows"}` – the same shape as the stand-in, so the supervisor doesn't care which is used.
+# MAGIC
+# MAGIC This cell only defines the function; it's called in Step 4 (and only if a space ID is set).
 
 # COMMAND ----------
 
@@ -114,6 +156,16 @@ def ask_genie(question):
 # MAGIC ### Step 4 – Stand-in data agent (only used when no Genie Space ID is set)
 # MAGIC **What:** an LLM writes one SQL query from the table schemas, we run it with Spark. This imitates what Genie does so
 # MAGIC the rest of the notebook works – but real Genie adds curated instructions, example queries, permissions and a UI.
+# MAGIC
+# MAGIC **Code walk-through:**
+# MAGIC - `SCHEMA_TEXT` describes the tables and the business rules ("late" = days_late > 3, revenue = quantity × price).
+# MAGIC   That's the same kind of information you give Genie as instructions.
+# MAGIC - `standin_genie()` asks the LLM for SQL only, strips any ``` code fences, and **refuses anything that isn't a
+# MAGIC   SELECT/WITH query** – a simple guardrail so an LLM can never run `DROP TABLE`. Results are capped at 50 rows.
+# MAGIC - `data_agent()` is the single entry point: Genie if a space ID is set, otherwise the stand-in.
+# MAGIC
+# MAGIC **How to read the output:** a JSON dict with the SQL that was written and the rows. Check the numbers against
+# MAGIC Step 1: Laptops 3600, Audio 1350, Monitors 800, Accessories 225.
 
 # COMMAND ----------
 
@@ -153,6 +205,11 @@ print(json.dumps(data_agent("What is total revenue by product category?"), inden
 # MAGIC %md
 # MAGIC ### Step 5 – The policy (knowledge) agent
 # MAGIC **What:** answers from policy documents only. (In production: a Vector Search retriever or a Knowledge Assistant.)
+# MAGIC
+# MAGIC **Why "say 'not covered by policy' otherwise":** gives the agent a safe way to say "I don't know" instead of
+# MAGIC inventing a rule.
+# MAGIC
+# MAGIC **How to read the output:** an answer mentioning the investigation and the $10 store credit.
 
 # COMMAND ----------
 
@@ -176,6 +233,21 @@ print(policy_agent("What do customers get when an order is late?"))
 # MAGIC
 # MAGIC **Why split the question:** "How many orders are late, and what do we owe those customers?" needs *numbers*
 # MAGIC (Genie) **and** *policy* (documents). Neither agent alone can answer it.
+# MAGIC
+# MAGIC **Example plan the router should return:**
+# MAGIC ```json
+# MAGIC {"tasks": [{"agent": "data",   "question": "How many orders have days_late > 3?"},
+# MAGIC            {"agent": "policy", "question": "What are customers entitled to when an order is late?"}]}
+# MAGIC ```
+# MAGIC
+# MAGIC **Code walk-through of `supervisor()`:**
+# MAGIC 1. Ask the LLM (with `ROUTER` instructions) for the plan and parse the JSON.
+# MAGIC 2. For each task, call `data_agent` or `policy_agent`; collect everything in `findings` and print each step.
+# MAGIC 3. One final LLM call writes the answer from `findings` only.
+# MAGIC
+# MAGIC **How to read the output:** the `[data]` and `[policy]` lines show the routing and each specialist's raw result.
+# MAGIC The final answer should say **2 orders** are more than 3 days late and that they qualify for an investigation and a
+# MAGIC **$10 store credit**.
 
 # COMMAND ----------
 
@@ -205,6 +277,14 @@ print("FINAL ANSWER:\n" + supervisor("How many orders are more than 3 days late,
 # MAGIC ### Step 7 – Try more requests
 # MAGIC **How to read:** check the printed routing – pure data questions should go only to `data`, pure policy questions
 # MAGIC only to `policy`, and mixed questions to both.
+# MAGIC
+# MAGIC | Request | Expected routing | Expected answer |
+# MAGIC |---|---|---|
+# MAGIC | Which category earned the most revenue? | data only | Laptops (3600) |
+# MAGIC | Can a customer return headphones bought 20 days ago? | policy only | yes – within 30 days of delivery |
+# MAGIC | List shipped orders + warranty rule | data **and** policy | orders 5003, 5004 + free replacement within 15 days |
+# MAGIC
+# MAGIC Each request makes several model calls (router, specialists, final answer), so this cell takes a little while.
 
 # COMMAND ----------
 

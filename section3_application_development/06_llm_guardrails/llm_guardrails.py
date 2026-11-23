@@ -26,10 +26,41 @@
 # MAGIC
 # MAGIC **On Databricks:** **AI Gateway** on a serving endpoint can add built-in safety filtering and PII detection
 # MAGIC without code (shown at the end). Here we write the guardrails ourselves so you see how they work.
+# MAGIC
+# MAGIC ### Key words used in this notebook
+# MAGIC | Word | Plain meaning |
+# MAGIC |---|---|
+# MAGIC | **Guardrail** | A check that runs before or after the model and can block or change the message |
+# MAGIC | **PII** | Personally Identifiable Information – emails, phone numbers, card numbers… |
+# MAGIC | **Masking** | Replacing PII with a label, e.g. `jane@x.com` → `[EMAIL]` |
+# MAGIC | **Prompt injection** | A user trying to override the bot's rules ("ignore all previous instructions…") |
+# MAGIC | **Classifier** | A model call that only returns a label (YES/NO, ALLOWED/BLOCKED) instead of an answer |
+# MAGIC | **Grounded** | Every fact in the answer is supported by the source (our policy) |
+# MAGIC | **Fallback** | The safe message shown when a guardrail blocks something |
+# MAGIC | **False positive** | A good message blocked by mistake |
+# MAGIC
+# MAGIC ### How the cells connect
+# MAGIC ```
+# MAGIC Step 1     policy, test_messages, call_model()
+# MAGIC Guardrail 1  mask_pii()              ─┐  input checks
+# MAGIC Guardrail 2  is_injection()          ─┤  (each is tested alone on one message)
+# MAGIC Guardrail 3  topic_allowed()         ─┤
+# MAGIC Guardrail 4  output_rule_violations()─┤  output checks
+# MAGIC Guardrail 5  is_grounded()           ─┘
+# MAGIC Putting it together: guarded_chat() uses ALL five, in order, on all 5 test messages
+# MAGIC ```
+# MAGIC Each guardrail cell first **defines** a function and then **tries it** on an example so you can see it work alone.
 
 # COMMAND ----------
 
-# MAGIC %md ### Step 1 – Setup: the model, the policy, and test messages (good and bad)
+# MAGIC %md
+# MAGIC ### Step 1 – Setup: the model, the policy, and test messages (good and bad)
+# MAGIC **What:**
+# MAGIC - `policy` – the only facts the bot is allowed to use.
+# MAGIC - `test_messages` – 5 messages: 2 normal ones and 3 "attacks" (injection, PII, unsafe topic). Testing with
+# MAGIC   **both** good and bad inputs is the only way to know the guardrails block the bad *without* blocking the good.
+# MAGIC - `call_model(system, user, max_tokens)` – the plain model call. Guardrail classifiers use `max_tokens=3` because
+# MAGIC   they only need to answer one word (YES/NO), which is faster and cheaper.
 
 # COMMAND ----------
 
@@ -66,6 +97,16 @@ def call_model(system, user, max_tokens=200):
 # MAGIC **What:** regular expressions find e-mails, card numbers and phone numbers and replace them with labels like
 # MAGIC `[EMAIL]`.
 # MAGIC **Why:** the model doesn't need the real values to help, and masked text is safe to log and store.
+# MAGIC
+# MAGIC **How the patterns work (in plain words):**
+# MAGIC - `EMAIL` – some letters/dots, an `@`, a domain, a dot, an ending (`jane.doe@example.com`).
+# MAGIC - `CARD` – 13 to 16 digits, optionally separated by spaces or dashes (`4111 1111 1111 1111`).
+# MAGIC - `PHONE` – 3 digits, 3 digits, 4 digits with `-`, `.` or space between (`555-123-4567`).
+# MAGIC
+# MAGIC `mask_pii()` returns two things: the masked text and a list of what was found.
+# MAGIC
+# MAGIC **How to read the output:** expect something like
+# MAGIC `('My email is [EMAIL] and card [CARD], is my refund done?', ['EMAIL', 'CARD'])`.
 
 # COMMAND ----------
 
@@ -91,6 +132,12 @@ print(mask_pii(test_messages[2]))
 # MAGIC ### Guardrail 2 – Detect prompt injection
 # MAGIC **What:** two layers – (a) a quick list of known attack phrases, (b) an LLM classifier for cleverer wording.
 # MAGIC **Why two layers:** the phrase list is instant and free; the classifier catches rephrased attacks the list misses.
+# MAGIC
+# MAGIC **How `is_injection()` works:** if any known phrase appears, it returns `True` straight away (no model call).
+# MAGIC Otherwise it asks the model to answer only YES or NO. It returns `(True/False, which layer decided)`.
+# MAGIC
+# MAGIC **How to read the output:** `(True, 'matched known attack phrase')` – message 2 contains
+# MAGIC "ignore all previous instructions", so the cheap layer caught it.
 
 # COMMAND ----------
 
@@ -114,6 +161,11 @@ print(is_injection(test_messages[1]))
 # MAGIC ### Guardrail 3 – Topic & safety filter
 # MAGIC **What:** an LLM classifier labels the request ALLOWED (shop support) or BLOCKED (off-topic or unsafe).
 # MAGIC **Why:** a support bot shouldn't give lock-picking, medical or legal advice – even if the model *could*.
+# MAGIC
+# MAGIC **Tip:** the classifier prompt lists what is ALLOWED explicitly. Defining the allowed topics ("allow-list") is safer
+# MAGIC than trying to list every bad topic.
+# MAGIC
+# MAGIC **How to read the output:** `False True` – the lock-picking question is blocked, the laptop return is allowed.
 
 # COMMAND ----------
 
@@ -133,6 +185,16 @@ print(topic_allowed(test_messages[3]), topic_allowed(test_messages[0]))
 # MAGIC ### Guardrail 4 – Business rules on the answer
 # MAGIC **What:** block answers that promise money or guarantees not in the policy, or that contain PII.
 # MAGIC **Why:** a single wrong promise ("we'll pay you $500") can cost real money or create legal problems.
+# MAGIC
+# MAGIC **What `output_rule_violations()` checks (no AI, just code):**
+# MAGIC 1. PII in the answer – reuses `mask_pii()` from Guardrail 1.
+# MAGIC 2. Any `$` amount that isn't written in the policy (the policy only mentions `$10`).
+# MAGIC 3. Risky words: "guarantee", "compensat…", "full refund today".
+# MAGIC
+# MAGIC It returns a list of problems; an **empty list `[]` means the answer is OK**.
+# MAGIC
+# MAGIC **How to read the output:** the first example lists two problems ($500 not in policy, promise outside policy);
+# MAGIC the second prints `[]`.
 
 # COMMAND ----------
 
@@ -156,6 +218,11 @@ print(output_rule_violations("You can return it within 30 days."))
 # MAGIC ### Guardrail 5 – Grounding check (is the answer supported by the policy?)
 # MAGIC **What:** a second LLM call acts as a fact-checker: "Is every claim in this answer supported by the policy?"
 # MAGIC **Why:** catches hallucinations that rule checks can't see (e.g. "returns within 60 days").
+# MAGIC
+# MAGIC **How it works:** we send the policy and the answer together and ask for YES/NO. The fact-checker never sees the
+# MAGIC customer's question – it only compares the answer with the policy.
+# MAGIC
+# MAGIC **How to read the output:** `False True` – "60 days" isn't supported, "30 days" is.
 
 # COMMAND ----------
 
@@ -176,6 +243,20 @@ print(is_grounded("You can return items within 60 days."), is_grounded("Returns 
 # MAGIC Every decision is recorded in a log, so you can audit *why* something was blocked.
 # MAGIC **Why a fallback message:** when a check fails we never show the risky answer; we show a safe, helpful message
 # MAGIC and (in a real app) hand over to a human.
+# MAGIC
+# MAGIC **Walk-through of `guarded_chat()` – the order matters:**
+# MAGIC 1. **Mask PII first**, so every later step (including logs and the model) only sees `[EMAIL]`, `[CARD]`.
+# MAGIC 2. **Injection check** → if attack, stop and return `FALLBACK`.
+# MAGIC 3. **Topic check** → if off-topic/unsafe, stop and return `FALLBACK`.
+# MAGIC 4. **Call the model** with `SYSTEM_PROMPT` (the policy + "never promise refunds") – a guardrail in itself.
+# MAGIC 5. **Business rules** on the answer → if any problem, return `FALLBACK`.
+# MAGIC 6. **Grounding check** → if not supported by the policy, return `FALLBACK`.
+# MAGIC 7. Passed everything → return the real answer.
+# MAGIC
+# MAGIC Cheap checks run before expensive ones, and we **stop at the first failure** – no point calling the model for an
+# MAGIC attack we already caught. `blocked_at` records which step stopped it (or `None` if nothing did).
+# MAGIC
+# MAGIC **Model calls:** up to 4 per message (injection classifier, topic classifier, answer, grounding check).
 
 # COMMAND ----------
 
