@@ -1,9 +1,39 @@
-# databricks-fde-usecases
+# Databricks GenAI Lab
 
-Customer Support AI practice examples for Databricks (works in Free Edition), one folder per exam objective.
-An e-commerce assistant that classifies complaints, analyzes sentiment, retrieves policies, recommends actions and extracts structured info.
+Hands-on Databricks notebooks for building Generative AI applications, organised by the six sections of the
+**Databricks Certified Generative AI Engineer Associate** exam guide, with one folder per exam objective.
 
-### Section 1 – Design Applications (`section1_design_applications/`)
+Every example uses the same scenario: a **Customer Support AI assistant for an e-commerce company** that classifies
+complaints, analyses sentiment, retrieves policies, recommends actions and extracts structured information.
+All notebooks run on **serverless compute** and work in **Databricks Free Edition**.
+
+---
+
+## Contents
+
+| Section | Folder | Notebooks | Unity Catalog schema |
+|---|---|---|---|
+| 1 – Design Applications | `section1_design_applications/` | 7 | `workspace.fde_customer_support` |
+| 2 – Data Preparation | `section2_data_preparation/` | 8 | `workspace.fde_data_prep` |
+| 3 – Application Development | `section3_application_development/` | 13 | `workspace.fde_app_dev` |
+| 4 – Assembling and Deploying Applications | `section4_assembling_deploying/` | 12 | `workspace.fde_deploy` |
+| 5 – Governance | `section5_governance/` | 4 | `workspace.fde_governance` |
+| 6 – Evaluation and Monitoring | `section6_evaluation_monitoring/` | 10 | `workspace.fde_eval_monitor` |
+
+## How the notebooks are written
+
+- **Self-contained:** Sections 2–6 create their own sample data and need no shared helpers. Section 1 shares one
+  config notebook (`00_setup/config`) and one sample-data notebook.
+- **Beginner-friendly:** cells include plain-language comments, key-word tables, cell-flow notes and
+  "how to read the output" explanations.
+- **Direct model calls:** LLMs are called with plain `mlflow.deployments` code (`client.predict(...)`) against
+  Foundation Model API endpoints, with no wrapper functions hiding what happens.
+- **Safe by default:** cells that create billable or long-running resources, or change endpoints, sit behind flags
+  that default to `False` (see [Cost and safety notes](#cost-and-safety-notes)).
+
+---
+
+## Section 1 – Design Applications (`section1_design_applications/`)
 
 | Folder | Objective |
 |---|---|
@@ -15,8 +45,11 @@ An e-commerce assistant that classifies complaints, analyzes sentiment, retrieve
 | `05_tools_multistage_reasoning/` | Define and order tools: fixed orchestration vs tool-calling agent |
 | `06_agent_bricks/` | Knowledge Assistant, Multiagent Supervisor, Information Extraction – when to use each |
 
-### Section 2 – Data Preparation (`section2_data_preparation/`)
-Self-contained notebooks (no shared helpers) with beginner-friendly comments and their own sample data.
+Run `00_setup/create_sample_data` first. It creates the `customer_support_tickets`, `customer_support_policies` and
+`customer_orders` tables and the `policy_docs` Volume. Notebooks 01–06 load the shared settings with
+`%run ../00_setup/config`.
+
+## Section 2 – Data Preparation (`section2_data_preparation/`)
 
 | Folder | Objective |
 |---|---|
@@ -29,10 +62,7 @@ Self-contained notebooks (no shared helpers) with beginner-friendly comments and
 | `07_advanced_chunking/` | Contextual headers, semantic chunking, parent–child, sentence window, metadata filters |
 | `08_reranking/` | Two-stage retrieval: vector search then LLM re-ranker, with before/after MRR |
 
-Section 2 writes to schema `workspace.fde_data_prep`.
-
-### Section 3 – Application Development (`section3_application_development/`)
-Self-contained notebooks with step-by-step What / Why / How-to-read explanations for junior engineers.
+## Section 3 – Application Development (`section3_application_development/`)
 
 | Folder | Objective |
 |---|---|
@@ -50,10 +80,9 @@ Self-contained notebooks with step-by-step What / Why / How-to-read explanations
 | `12_evaluation_vs_monitoring/` | Offline eval + release gate vs 14 days of production logs, alerts, drift, feedback loop |
 | `13_multi_agent_genie/` | Genie Conversation API as a data agent + policy agent under a supervisor (stand-in if no space) |
 
-Section 3 writes to schema `workspace.fde_app_dev` (notebook 13).
+Only notebook 13 writes tables (to `workspace.fde_app_dev`).
 
-### Section 4 – Assembling and Deploying Applications (`section4_assembling_deploying/`)
-Self-contained notebooks with key-word tables, cell-flow diagrams and "how to read the output" notes.
+## Section 4 – Assembling and Deploying Applications (`section4_assembling_deploying/`)
 
 | Folder | Objective |
 |---|---|
@@ -70,10 +99,7 @@ Self-contained notebooks with key-word tables, cell-flow diagrams and "how to re
 | `11_persistent_memory_store/` | Short-term chat memory, long-term facts (MERGE), task state in Delta; Lakebase notes |
 | `12_cicd_best_practices/` | Unit tests with mock LLM, Prompt Registry dev→prod promotion, index update + retrieval test, bundle CI |
 
-Section 4 writes to schema `workspace.fde_deploy`. **Cost note:** 4.6 creates a Vector Search endpoint that keeps
-running until you delete it (cleanup cell at the end); 4.7 only creates a serving endpoint if you set `DEPLOY = True`.
-
-### Section 5 – Governance (`section5_governance/`)
+## Section 5 – Governance (`section5_governance/`)
 
 | Folder | Objective |
 |---|---|
@@ -82,9 +108,7 @@ running until you delete it (cleanup cell at the end); 4.7 only creates a servin
 | `03_legal_licensing_data_sources/` | Licence table, data source register with include/review/exclude rules, UC tags, licence-filtered chunks, attribution by code |
 | `04_problematic_text_mitigation/` | Detect toxic/outdated/PII/dangerous/biased/spam posts; mask, detoxify, drop, replace with official source, review queue |
 
-Section 5 writes to schema `workspace.fde_governance`.
-
-### Section 6 – Evaluation and Monitoring (`section6_evaluation_monitoring/`)
+## Section 6 – Evaluation and Monitoring (`section6_evaluation_monitoring/`)
 
 | Folder | Objective |
 |---|---|
@@ -99,20 +123,91 @@ Section 5 writes to schema `workspace.fde_governance`.
 | `09_custom_scorers/` | `@scorer` code, `Feedback`, expectations, trace and LLM-judge scorers, `Guidelines`, `make_judge`, scorer unit tests |
 | `10_sme_feedback/` | SME `log_feedback`/`log_expectation` on traces, labeling sessions, eval dataset + guidelines → v2, v1 vs v2 evaluation |
 
-Section 6 writes to schema `workspace.fde_eval_monitor` and MLflow experiments `/Users/<you>/fde_section6_*`.
-Endpoint-changing cells are off by default (`ENABLE_INFERENCE_TABLE`, `START_MONITORING`, `APPLY` = `False`).
+Section 6 also logs to MLflow experiments under `/Users/<you>/fde_section6_*`.
 
-Defaults: catalog `workspace`, schema `fde_customer_support`, endpoint `databricks-meta-llama-3-3-70b-instruct` (edit `section1_design_applications/00_setup/config.py` or the widgets).
-Run `section1_design_applications/00_setup/create_sample_data` first; the other notebooks are independent.
-Each notebook calls the model endpoint directly with plain `mlflow.deployments` code (`client.predict(...)`), no shared helper functions.
+---
 
-## Deploy & run
-```bash
-databricks bundle deploy            # uploads notebooks to /Users/<you>/databricks-fde-usecases
-databricks bundle run customer_support_ai_usecases   # Section 1 notebooks on serverless
-databricks bundle run data_preparation_usecases      # Section 2 notebooks on serverless
-databricks bundle run application_development_usecases   # Section 3 notebooks on serverless
-databricks bundle run assembling_deploying_usecases       # Section 4 notebooks on serverless
-databricks bundle run governance_usecases                  # Section 5 notebooks on serverless
-databricks bundle run evaluation_monitoring_usecases       # Section 6 notebooks on serverless
+## Prerequisites
+
+- A Databricks workspace with Unity Catalog and serverless compute (Free Edition works)
+- Access to Foundation Model API endpoints (default: `databricks-meta-llama-3-3-70b-instruct`)
+- [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html) v0.218+ to deploy with Asset Bundles
+- Optional: a Genie space for `section3/13_multi_agent_genie` (the notebook falls back to a stand-in without one)
+
+## Configuration
+
+| Setting | Default | Where to change |
+|---|---|---|
+| Catalog | `workspace` | widget, or `section1_design_applications/00_setup/config.py` |
+| Schema (Section 1) | `fde_customer_support` | widget, or `config.py` |
+| Model endpoint | `databricks-meta-llama-3-3-70b-instruct` | widget, or `config.py` |
+
+Sections 2–6 don't use this config: any catalog, schema or endpoint a notebook needs is set inside that notebook.
+
+## Getting started
+
+### Option A – Asset Bundle (recommended)
+
+1. Edit the `targets.dev.workspace` block in `databricks.yml` (host, profile, root path) to match your workspace.
+2. Validate and deploy:
+
+   ```bash
+   databricks bundle validate
+   databricks bundle deploy            # uploads notebooks to /Users/<you>/databricks-fde-usecases
+   ```
+
+3. Run a whole section as a serverless job:
+
+   | Section | Command |
+   |---|---|
+   | 1 | `databricks bundle run customer_support_ai_usecases` |
+   | 2 | `databricks bundle run data_preparation_usecases` |
+   | 3 | `databricks bundle run application_development_usecases` |
+   | 4 | `databricks bundle run assembling_deploying_usecases` |
+   | 5 | `databricks bundle run governance_usecases` |
+   | 6 | `databricks bundle run evaluation_monitoring_usecases` |
+
+   You can also open any deployed notebook in the workspace and run it cell by cell.
+
+### Option B – Git folder
+
+Clone this repo into a Databricks Git folder (**Workspace → Create → Git folder**), attach a notebook to serverless
+compute and run it. For Section 1, run `00_setup/create_sample_data` first.
+
+## Cost and safety notes
+
+- **4.6 `create_query_vector_search`** creates a Vector Search endpoint that keeps running (and billing) until you
+  delete it. Run the cleanup cell at the end of the notebook.
+- **4.7 `serve_with_foundation_model_apis`** creates a serving endpoint only if you set `DEPLOY = True`.
+- **Section 6** cells that change endpoints are off by default: `ENABLE_INFERENCE_TABLE`, `START_MONITORING` and
+  `APPLY` are all `False`.
+- Pay-per-token Foundation Model API calls are billed per token. The sample datasets are small, so a full run costs little.
+
+## Cleanup
+
+Each section writes only to its own schema, so you can remove a section's data by dropping its schema:
+
+```sql
+DROP SCHEMA IF EXISTS workspace.fde_customer_support CASCADE;  -- Section 1
+DROP SCHEMA IF EXISTS workspace.fde_data_prep CASCADE;         -- Section 2
+DROP SCHEMA IF EXISTS workspace.fde_app_dev CASCADE;           -- Section 3
+DROP SCHEMA IF EXISTS workspace.fde_deploy CASCADE;            -- Section 4
+DROP SCHEMA IF EXISTS workspace.fde_governance CASCADE;        -- Section 5
+DROP SCHEMA IF EXISTS workspace.fde_eval_monitor CASCADE;      -- Section 6
+```
+
+Delete any Vector Search or serving endpoints you created from the **Compute → Vector Search** and **Serving** pages,
+and remove the deployed bundle with `databricks bundle destroy`.
+
+## Repository layout
+
+```
+.
+├── databricks.yml                     # Asset Bundle: one serverless job per section
+├── section1_design_applications/
+├── section2_data_preparation/
+├── section3_application_development/
+├── section4_assembling_deploying/
+├── section5_governance/
+└── section6_evaluation_monitoring/
 ```
