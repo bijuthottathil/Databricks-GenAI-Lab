@@ -3,6 +3,8 @@
 Customer Support AI practice examples for Databricks (works in Free Edition), one folder per exam objective.
 An e-commerce assistant that classifies complaints, analyzes sentiment, retrieves policies, recommends actions and extracts structured info.
 
+### Section 1 – Design Applications (`section1_design_applications/`)
+
 | Folder | Objective |
 |---|---|
 | `00_setup/` | `config` (catalog / schema / model endpoint) and `create_sample_data` (tickets, policies, orders tables + policy docs Volume) |
@@ -100,8 +102,8 @@ Section 5 writes to schema `workspace.fde_governance`.
 Section 6 writes to schema `workspace.fde_eval_monitor` and MLflow experiments `/Users/<you>/fde_section6_*`.
 Endpoint-changing cells are off by default (`ENABLE_INFERENCE_TABLE`, `START_MONITORING`, `APPLY` = `False`).
 
-Defaults: catalog `workspace`, schema `fde_customer_support`, endpoint `databricks-meta-llama-3-3-70b-instruct` (edit `00_setup/config.py` or the widgets).
-Run `00_setup/create_sample_data` first; the other notebooks are independent.
+Defaults: catalog `workspace`, schema `fde_customer_support`, endpoint `databricks-meta-llama-3-3-70b-instruct` (edit `section1_design_applications/00_setup/config.py` or the widgets).
+Run `section1_design_applications/00_setup/create_sample_data` first; the other notebooks are independent.
 Each notebook calls the model endpoint directly with plain `mlflow.deployments` code (`client.predict(...)`), no shared helper functions.
 
 ## Deploy & run

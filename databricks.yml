@@ -23,25 +23,25 @@ resources:
       name: customer_support_ai_usecases
       tasks:
         - task_key: setup_data
-          notebook_task: { notebook_path: ./00_setup/create_sample_data.py }
+          notebook_task: { notebook_path: ./section1_design_applications/00_setup/create_sample_data.py }
         - task_key: uc01_prompt_formatted_response
           depends_on: [{ task_key: setup_data }]
-          notebook_task: { notebook_path: ./01_prompt_formatted_response/prompt_json_classifier.py }
+          notebook_task: { notebook_path: ./section1_design_applications/01_prompt_formatted_response/prompt_json_classifier.py }
         - task_key: uc02_model_task_selection
           depends_on: [{ task_key: uc01_prompt_formatted_response }]
-          notebook_task: { notebook_path: ./02_model_task_selection/model_tasks.py }
+          notebook_task: { notebook_path: ./section1_design_applications/02_model_task_selection/model_tasks.py }
         - task_key: uc03_chain_components
           depends_on: [{ task_key: uc02_model_task_selection }]
-          notebook_task: { notebook_path: ./03_chain_components/langchain_chains.py }
+          notebook_task: { notebook_path: ./section1_design_applications/03_chain_components/langchain_chains.py }
         - task_key: uc04_pipeline_inputs_outputs
           depends_on: [{ task_key: uc03_chain_components }]
-          notebook_task: { notebook_path: ./04_pipeline_inputs_outputs/ai_pipeline_design.py }
+          notebook_task: { notebook_path: ./section1_design_applications/04_pipeline_inputs_outputs/ai_pipeline_design.py }
         - task_key: uc05_tools_multistage_reasoning
           depends_on: [{ task_key: uc04_pipeline_inputs_outputs }]
-          notebook_task: { notebook_path: ./05_tools_multistage_reasoning/tools_and_agent.py }
+          notebook_task: { notebook_path: ./section1_design_applications/05_tools_multistage_reasoning/tools_and_agent.py }
         - task_key: uc06_agent_bricks
           depends_on: [{ task_key: uc05_tools_multistage_reasoning }]
-          notebook_task: { notebook_path: ./06_agent_bricks/agent_bricks_patterns.py }
+          notebook_task: { notebook_path: ./section1_design_applications/06_agent_bricks/agent_bricks_patterns.py }
 
     data_preparation_usecases:
       name: data_preparation_usecases
